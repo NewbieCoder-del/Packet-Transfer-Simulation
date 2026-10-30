@@ -1,122 +1,129 @@
-import { useState, type ReactNode } from 'react';
-import { useStore } from '../../store';
 import type { CanvasTool } from '../../store/ui-slice';
+import { useStore } from '../../store';
+import { TipButton } from '../common/ui';
+const TOOL_LABEL = { select: 'Select / move', pan: 'Pan', connect: 'Connect' } as const;
 
 interface Props {
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onFitView: () => void;
+  onResetView: () => void;
 }
 
-const tools: { id: CanvasTool; icon: ReactNode; shortcut: string; labelKey: 'tool.select' | 'tool.pan' }[] = [
-  {
-    id: 'select',
-    shortcut: 'V',
-    labelKey: 'tool.select',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M2 1l10 5.5L7.5 8 6 13z" />
-      </svg>
-    ),
-  },
-  {
-    id: 'pan',
-    shortcut: 'G',
-    labelKey: 'tool.pan',
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M6.5 1.5a1 1 0 0 1 2 0V6h1.5V3.5a1 1 0 0 1 2 0V6H13a1 1 0 0 1 2 0v4.5a4.5 4.5 0 0 1-4.5 4.5h-2A4.5 4.5 0 0 1 4 10.5V8a1 1 0 0 1 2 0v.5h.5V1.5z" />
-      </svg>
-    ),
-  },
-];
+const SelectIcon = (
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M2.5 1.2l9.2 5.1-4 1.1-1.3 4z" />
+  </svg>
+);
+
+const PanIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V11m0-1V4.5a1.5 1.5 0 0 1 3 0V11m0-.5V6a1.5 1.5 0 0 1 3 0v7.5c0 4-2.5 6.5-6 6.5s-5-2-6.5-4.5L5 13.5a1.5 1.5 0 0 1 2.6-1.5L8 13" />
+  </svg>
+);
+
+const LinkIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+    <path d="M9 15l6-6" />
+    <path d="M13.5 7.5l1.8-1.8a3.2 3.2 0 0 1 4.5 4.5l-1.8 1.8M10.5 16.5l-1.8 1.8a3.2 3.2 0 0 1-4.5-4.5l1.8-1.8" />
+  </svg>
+);
+
+const GridIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+  </svg>
+);
 
 const ZoomInIcon = (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <circle cx="7" cy="7" r="5.5" />
-    <line x1="7" y1="4.5" x2="7" y2="9.5" />
-    <line x1="4.5" y1="7" x2="9.5" y2="7" />
-    <line x1="11" y1="11" x2="14.5" y2="14.5" />
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="7" cy="7" r="5.2" />
+    <path d="M7 4.6v4.8M4.6 7h4.8M10.8 10.8L14 14" strokeLinecap="round" />
   </svg>
 );
 
 const ZoomOutIcon = (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <circle cx="7" cy="7" r="5.5" />
-    <line x1="4.5" y1="7" x2="9.5" y2="7" />
-    <line x1="11" y1="11" x2="14.5" y2="14.5" />
+  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="7" cy="7" r="5.2" />
+    <path d="M4.6 7h4.8M10.8 10.8L14 14" strokeLinecap="round" />
   </svg>
 );
 
-export default function CanvasToolbar({ onZoomIn, onZoomOut }: Props) {
+const FitIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15" />
+  </svg>
+);
+
+const ResetIcon = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 10a8 8 0 1 1 1.2 6.9" />
+    <path d="M4 4v6h6" />
+  </svg>
+);
+
+const TOOLS: { id: CanvasTool; icon: typeof SelectIcon; shortcut: string }[] = [
+  { id: 'select', icon: SelectIcon, shortcut: 'V' },
+  { id: 'pan', icon: PanIcon, shortcut: 'H' },
+  { id: 'connect', icon: LinkIcon, shortcut: 'C' },
+];
+
+export default function CanvasToolbar({ onZoomIn, onZoomOut, onFitView, onResetView }: Props) {
   const canvasTool = useStore((s) => s.canvasTool);
   const setCanvasTool = useStore((s) => s.setCanvasTool);
-  const t = useStore((s) => s.t);
-  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-
-  const zoomButtons = [
-    { id: 'zoomIn', icon: ZoomInIcon, labelKey: 'tool.zoomIn' as const, shortcut: '[', onClick: onZoomIn },
-    { id: 'zoomOut', icon: ZoomOutIcon, labelKey: 'tool.zoomOut' as const, shortcut: ']', onClick: onZoomOut },
-  ];
+  const pendingDeviceType = useStore((s) => s.pendingDeviceType);
+  const snapToGrid = useStore((s) => s.snapToGrid);
+  const setSnapToGrid = useStore((s) => s.setSnapToGrid);
+  const zoom = useStore((s) => s.canvasZoom);
 
   return (
     <div
-      style={{ position: 'absolute', bottom: '1rem', left: '50%', transform: 'translateX(-50%)', zIndex: 10 }}
-      className="flex items-center gap-1 bg-gray-900/90 backdrop-blur-sm border border-gray-700 rounded-lg p-1"
+      role="toolbar"
+      aria-label={"Canvas tools"}
+      className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-md border border-line-1 bg-surface-1/95 p-1 shadow-panel backdrop-blur-sm"
     >
-      {tools.map((tool) => (
-        <div
+      {TOOLS.map((tool) => (
+        <TipButton
           key={tool.id}
-          style={{ position: 'relative' }}
-          onMouseEnter={() => setHoveredItem(tool.id)}
-          onMouseLeave={() => setHoveredItem(null)}
+          label={TOOL_LABEL[tool.id]}
+          shortcut={tool.shortcut}
+          active={canvasTool === tool.id && !pendingDeviceType}
+          onClick={() => setCanvasTool(tool.id)}
         >
-          <button
-            onClick={() => setCanvasTool(tool.id)}
-            className={`w-9 h-9 flex items-center justify-center rounded-md transition-colors ${
-              canvasTool === tool.id
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-            }`}
-          >
-            {tool.icon}
-          </button>
-          {hoveredItem === tool.id && (
-            <div
-              style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '0.5rem', pointerEvents: 'none' }}
-              className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200 whitespace-nowrap"
-            >
-              {t[tool.labelKey]} <kbd className="ml-1 px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-400 font-mono">{tool.shortcut}</kbd>
-            </div>
-          )}
-        </div>
+          {tool.icon}
+        </TipButton>
       ))}
 
-      {/* Separator */}
-      <div className="w-px h-6 bg-gray-700 mx-0.5" />
+      <div className="mx-1 h-5 w-px bg-line-1" />
 
-      {zoomButtons.map((btn) => (
-        <div
-          key={btn.id}
-          style={{ position: 'relative' }}
-          onMouseEnter={() => setHoveredItem(btn.id)}
-          onMouseLeave={() => setHoveredItem(null)}
-        >
-          <button
-            onClick={btn.onClick}
-            className="w-9 h-9 flex items-center justify-center rounded-md transition-colors text-gray-400 hover:bg-gray-700 hover:text-gray-200"
-          >
-            {btn.icon}
-          </button>
-          {hoveredItem === btn.id && (
-            <div
-              style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '0.5rem', pointerEvents: 'none' }}
-              className="px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200 whitespace-nowrap"
-            >
-              {t[btn.labelKey]} <kbd className="ml-1 px-1 py-0.5 bg-gray-700 rounded text-[10px] text-gray-400 font-mono">{btn.shortcut}</kbd>
-            </div>
-          )}
-        </div>
-      ))}
+      <TipButton
+        label={"Snap to grid"}
+        active={snapToGrid}
+        onClick={() => setSnapToGrid(!snapToGrid)}
+      >
+        {GridIcon}
+      </TipButton>
+
+      <div className="mx-1 h-5 w-px bg-line-1" />
+
+      <TipButton label={"Zoom Out"} shortcut="]" onClick={onZoomOut}>
+        {ZoomOutIcon}
+      </TipButton>
+      <span className="w-11 text-center font-mono text-[10px] text-ink-3">
+        {Math.round(zoom * 100)}%
+      </span>
+      <TipButton label={"Zoom In"} shortcut="[" onClick={onZoomIn}>
+        {ZoomInIcon}
+      </TipButton>
+
+      <div className="mx-1 h-5 w-px bg-line-1" />
+
+      <TipButton label={"Fit to topology"} shortcut="F" onClick={onFitView}>
+        {FitIcon}
+      </TipButton>
+      <TipButton label={"Reset view"} onClick={onResetView}>
+        {ResetIcon}
+      </TipButton>
     </div>
   );
 }

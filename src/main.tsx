@@ -2,11 +2,12 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
-import { getSavedLocale, getTranslations } from './i18n'
+import { applyTheme, DEFAULT_PREFS } from './store/ui-slice'
+import { loadPrefs } from './utils/storage'
 
-const initialLocale = getSavedLocale();
-document.documentElement.lang = initialLocale;
-document.title = getTranslations(initialLocale)['app.title'];
+document.documentElement.lang = 'en';
+document.title = 'NetLab Studio';
+applyTheme(loadPrefs(DEFAULT_PREFS).theme);
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

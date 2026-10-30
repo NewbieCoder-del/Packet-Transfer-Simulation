@@ -30,3 +30,29 @@ export function loadTopology(): SavedTopology | null {
 export function clearTopology(): void {
   localStorage.removeItem(STORAGE_KEY);
 }
+
+const PREFS_KEY = 'netlab-prefs';
+
+export interface UiPrefs {
+  theme: 'dark' | 'light';
+  leftWidth: number;
+  rightWidth: number;
+  dockHeight: number;
+  dockOpen: boolean;
+  snapToGrid: boolean;
+}
+
+export function loadPrefs(fallback: UiPrefs): UiPrefs {
+  const raw = localStorage.getItem(PREFS_KEY);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as Partial<UiPrefs>;
+    return { ...fallback, ...parsed };
+  } catch {
+    return fallback;
+  }
+}
+
+export function savePrefs(prefs: UiPrefs): void {
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}

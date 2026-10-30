@@ -1,20 +1,44 @@
+import { useState } from 'react';
 import { useStore } from '../../store';
 import { useSimulation } from '../../hooks/use-simulation';
 import { SCENARIOS, createPingScenario, createHttpScenario, createDnsScenario } from '../../engine/scenarios';
 import type { ScenarioType } from '../../engine/scenarios';
-import { AVAILABLE_LOCALES, type Translations } from '../../i18n';
+import { loadTopology } from '../../utils/storage';
 
-const SCENARIO_LABEL_KEYS: Record<ScenarioType, keyof Translations> = {
-  'ping': 'scenario.ping.label',
-  'http-request': 'scenario.httpRequest.label',
-  'dns-lookup': 'scenario.dnsLookup.label',
-};
+const PlayIcon = (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M4 2.5l9 5.5-9 5.5z" />
+  </svg>
+);
+const PauseIcon = (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <rect x="3.5" y="2.5" width="3.5" height="11" rx="1" />
+    <rect x="9" y="2.5" width="3.5" height="11" rx="1" />
+  </svg>
+);
+const StepIcon = (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M3 2.5l7 5.5-7 5.5z" />
+    <rect x="11" y="2.5" width="2.5" height="11" rx="1" />
+  </svg>
+);
+const ResetIcon = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 10a8 8 0 1 1 1.2 6.9" />
+    <path d="M4 4v6h6" />
+  </svg>
+);
 
-const SCENARIO_DESC_KEYS: Record<ScenarioType, keyof Translations> = {
-  'ping': 'scenario.ping.description',
-  'http-request': 'scenario.httpRequest.description',
-  'dns-lookup': 'scenario.dnsLookup.description',
-};
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-ink-3">{label}</span>
+      <div className="flex items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+const Divider = () => <div className="h-5 w-px bg-line-1" />;
 
 export default function SimulationToolbar() {
   const nodes = useStore((s) => s.nodes);
@@ -23,12 +47,16 @@ export default function SimulationToolbar() {
   const setSpeed = useStore((s) => s.setSpeed);
   const enqueueEvent = useStore((s) => s.enqueueEvent);
   const eventQueue = useStore((s) => s.eventQueue);
-  const t = useStore((s) => s.t);
   const tf = useStore((s) => s.tf);
-  const locale = useStore((s) => s.locale);
-  const setLocale = useStore((s) => s.setLocale);
 
   const { start, pause, resume, stepOnce, reset } = useSimulation();
+  const [flash, setFlash] = useState<string | null>(null);
+  const [hasSaved, setHasSaved] = useState(() => Boolean(loadTopology()));
+
+  const notify = (message: string) => {
+    setFlash(message);
+    window.setTimeout(() => setFlash((current) => (current === message ? null : current)), 2200);
+  };
 
   const launchScenario = (scenarioId: ScenarioType) => {
     const hosts = nodes.filter((n) => n.type === 'host');
@@ -55,146 +83,134 @@ export default function SimulationToolbar() {
       if (src && dns) events = createDnsScenario(src, dns);
     }
 
-    if (events.length === 0) return;
+    if (events.length === 0) {
+      notify("This scenario needs the matching devices");
+      return;
+    }
 
     reset();
-    for (const event of events) {
-      enqueueEvent(event);
-    }
+    for (const event of events) enqueueEvent(event);
+    start();
   };
 
+  const canRun = eventQueue.length > 0 || nodes.length >= 2;
+
   return (
-    <div className="h-12 bg-gray-900 border-b border-gray-700 flex items-center px-4 gap-3">
-      {/* Scenarios */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500 uppercase font-semibold">{t['toolbar.scenario']}</span>
+    <div className="flex h-11 shrink-0 items-center gap-3 overflow-x-auto border-b border-line-1 bg-surface-1 px-3">
+      <Group label={"Scenario"}>
         {SCENARIOS.map((s) => (
           <button
             key={s.id}
             onClick={() => launchScenario(s.id)}
-            disabled={nodes.length < 2}
-            className="px-3 py-1 text-xs rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700
-                       border border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            title={t[SCENARIO_DESC_KEYS[s.id]]}
+            disabled={!canRun}
+            title={s.description}
+            className="rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] font-medium text-ink-1
+                       transition-colors hover:border-line-2 hover:bg-surface-3
+                       disabled:cursor-not-allowed disabled:opacity-35"
           >
-            {t[SCENARIO_LABEL_KEYS[s.id]]}
+            {s.label}
           </button>
         ))}
-      </div>
+      </Group>
 
-      <div className="w-px h-6 bg-gray-700" />
+      <Divider />
 
-      {/* Controls */}
-      <div className="flex items-center gap-1.5">
-        {simState === 'idle' || simState === 'paused' ? (
+      <Group label={"Simulation"}>
+        {simState === 'running' || simState === 'stepping' ? (
           <button
-            onClick={eventQueue.length > 0 ? (simState === 'paused' ? resume : start) : undefined}
-            disabled={eventQueue.length === 0}
-            className="px-3 py-1 text-xs rounded-md bg-green-800 text-green-200 hover:bg-green-700
-                       disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            onClick={pause}
+            className="flex items-center gap-1.5 rounded-sm border border-warn/40 bg-warn/15 px-2.5 py-1.5 text-[11px] font-semibold text-warn hover:bg-warn/25"
           >
-            ▶ {t['toolbar.play']}
+            {PauseIcon}
+            {"Pause"}
           </button>
         ) : (
           <button
-            onClick={pause}
-            className="px-3 py-1 text-xs rounded-md bg-yellow-800 text-yellow-200 hover:bg-yellow-700 transition-colors"
+            onClick={simState === 'paused' ? resume : start}
+            disabled={eventQueue.length === 0}
+            className="flex items-center gap-1.5 rounded-sm border border-ok/40 bg-ok/15 px-2.5 py-1.5 text-[11px] font-semibold text-ok
+                       hover:bg-ok/25 disabled:cursor-not-allowed disabled:opacity-35"
           >
-            ⏸ {t['toolbar.pause']}
+            {PlayIcon}
+            {"Run"}
           </button>
         )}
         <button
           onClick={stepOnce}
-          disabled={eventQueue.length === 0 && simState !== 'paused'}
-          className="px-3 py-1 text-xs rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700
-                     border border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          disabled={eventQueue.length === 0}
+          title={"Step"}
+          className="flex items-center gap-1.5 rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-1 hover:bg-surface-3 disabled:opacity-35"
         >
-          ⏭ {t['toolbar.step']}
+          {StepIcon}
+          {"Step"}
         </button>
         <button
           onClick={reset}
-          className="px-3 py-1 text-xs rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700
-                     border border-gray-700 transition-colors"
+          title={"Reset"}
+          className="flex items-center gap-1.5 rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-1 hover:bg-surface-3"
         >
-          ↺ {t['toolbar.reset']}
+          {ResetIcon}
+          {"Reset"}
         </button>
-      </div>
+      </Group>
 
-      <div className="w-px h-6 bg-gray-700" />
+      <Divider />
 
-      {/* Speed */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-500">{t['toolbar.speed']}</span>
+      <div className="flex items-center gap-1 rounded-sm border border-line-1 bg-surface-2 p-0.5">
         {[0.5, 1, 2, 4].map((s) => (
           <button
             key={s}
             onClick={() => setSpeed(s)}
-            className={`px-2 py-0.5 text-xs rounded ${
-              speed === s
-                ? 'bg-blue-700 text-white'
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-            } transition-colors`}
+            aria-pressed={speed === s}
+            className={`rounded-xs px-2 py-1 font-mono text-[10px] transition-colors ${
+              speed === s ? 'bg-accent text-accent-ink' : 'text-ink-3 hover:text-ink-1'
+            }`}
           >
             {s}x
           </button>
         ))}
       </div>
 
-      <div className="w-px h-6 bg-gray-700" />
+      <Divider />
 
-      {/* Save/Load */}
-      <div className="flex items-center gap-1.5">
+      <Group label={"Topology"}>
         <button
-          onClick={() => useStore.getState().saveToStorage()}
+          onClick={() => {
+            useStore.getState().saveToStorage();
+            setHasSaved(true);
+            notify("Topology saved");
+          }}
           disabled={nodes.length === 0}
-          className="px-3 py-1 text-xs rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700
-                     border border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-1 hover:bg-surface-3 disabled:opacity-35"
         >
-          {t['toolbar.save']}
+          {"Save"}
         </button>
         <button
-          onClick={() => useStore.getState().loadFromStorage()}
-          className="px-3 py-1 text-xs rounded-md bg-gray-800 text-gray-300 hover:bg-gray-700
-                     border border-gray-700 transition-colors"
+          onClick={() => {
+            const loaded = useStore.getState().loadFromStorage();
+            notify(loaded ? "Topology loaded" : "No saved topology found");
+          }}
+          disabled={!hasSaved}
+          className="rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] text-ink-1 hover:bg-surface-3 disabled:opacity-35"
         >
-          {t['toolbar.load']}
+          {"Load"}
         </button>
-      </div>
+      </Group>
 
-      {/* Status + Language */}
-      <div className="ml-auto flex items-center gap-2">
+      {eventQueue.length > 0 && (
+        <span className="ml-auto shrink-0 font-mono text-[10px] text-ink-3">
+          {`${eventQueue.length} events queued`}
+        </span>
+      )}
+
+      {flash && (
         <span
-          className={`w-2 h-2 rounded-full ${
-            simState === 'running'
-              ? 'bg-green-400 animate-pulse'
-              : simState === 'paused'
-              ? 'bg-yellow-400'
-              : 'bg-gray-600'
-          }`}
-        />
-        <span className="text-xs text-gray-400 uppercase">{simState}</span>
-        {eventQueue.length > 0 && (
-          <span className="text-xs text-gray-500">
-            ({tf('toolbar.eventsQueued', { count: eventQueue.length })})
-          </span>
-        )}
-
-        <div className="flex items-center gap-1 ml-3 border-l border-gray-700 pl-3">
-          {AVAILABLE_LOCALES.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => setLocale(l.code)}
-              className={`px-2 py-0.5 text-xs rounded ${
-                locale === l.code
-                  ? 'bg-blue-700 text-white'
-                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-              } transition-colors`}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-      </div>
+          role="status"
+          className={`${eventQueue.length > 0 ? '' : 'ml-auto '}shrink-0 rounded-sm border border-accent/35 bg-accent/10 px-2 py-1 text-[10px] text-ink-1`}
+        >
+          {flash}
+        </span>
+      )}
     </div>
   );
 }

@@ -34,9 +34,9 @@ export function handleArpRequest(
     });
 
     // Check if neighbor has the target IP
-    const hasTargetIp = neighbor.interfaces.some((iface) => iface.ip === targetIp);
-    if (hasTargetIp) {
-      const replyMac = neighbor.interfaces[0]?.mac ?? 'FF:FF:FF:FF:FF:FF';
+    const targetIface = neighbor.interfaces.find((iface) => iface.ip === targetIp);
+    if (targetIface) {
+      const replyMac = targetIface.mac;
       const replyPacket: Packet = {
         id: generateId(),
         srcMac: replyMac,

@@ -2,6 +2,8 @@ export type DeviceType = 'host' | 'switch' | 'router' | 'dns-server' | 'web-serv
 
 export interface NetworkInterface {
   id: string;
+  /** Human-readable port name, e.g. "FastEthernet0/1" or "GigabitEthernet0/0". */
+  name: string;
   mac: string;
   ip?: string;
   subnetMask?: string;
@@ -86,12 +88,59 @@ export interface AnimatedPacket {
 }
 
 export type SimState = 'idle' | 'running' | 'paused' | 'stepping';
-export type DifficultyLevel = 'beginner' | 'intermediate' | 'advanced';
 
-export const DEVICE_DEFAULTS: Record<DeviceType, { label: string; color: string; icon: string }> = {
-  host:        { label: 'Host',       color: '#3B82F6', icon: '💻' },
-  switch:      { label: 'Switch',     color: '#10B981', icon: '🔀' },
-  router:      { label: 'Router',     color: '#F59E0B', icon: '🌐' },
-  'dns-server': { label: 'DNS Server', color: '#8B5CF6', icon: '📋' },
-  'web-server': { label: 'Web Server', color: '#EF4444', icon: '🖥️' },
+export type DeviceCategory = 'end' | 'infrastructure' | 'service';
+
+export interface DeviceMeta {
+  label: string;
+  /** Secondary line in the device library, e.g. "End device". */
+  blurb: string;
+  color: string;
+  category: DeviceCategory;
+  /** Interface naming prefix for this device's built-in ports. */
+  portPrefix: string;
+  /** Number of built-in ports the device is created with. */
+  portCount: number;
+  /** Whether the built-in ports carry an IPv4 address. */
+  layer3: boolean;
+}
+
+export const DEVICE_DEFAULTS: Record<DeviceType, DeviceMeta> = {
+  host:         { label: 'Host',        blurb: 'End device',    color: '#3B82F6', category: 'end',            portPrefix: 'Ethernet',          portCount: 1, layer3: true },
+  'web-server': { label: 'Web Server',  blurb: 'HTTP service',  color: '#EF4444', category: 'end',            portPrefix: 'Ethernet',          portCount: 1, layer3: true },
+  switch:       { label: 'Switch',      blurb: 'Layer 2',       color: '#10B981', category: 'infrastructure', portPrefix: 'FastEthernet0/',  portCount: 4, layer3: false },
+  router:       { label: 'Router',      blurb: 'Layer 3',       color: '#F59E0B', category: 'infrastructure', portPrefix: 'GigabitEthernet0/', portCount: 2, layer3: true },
+  'dns-server': { label: 'DNS Server',  blurb: 'Name service',  color: '#8B5CF6', category: 'service',        portPrefix: 'Ethernet',          portCount: 1, layer3: true },
+};
+
+export const DEVICE_ORDER: DeviceType[] = ['host', 'web-server', 'switch', 'router', 'dns-server'];
+
+export const PROTOCOL_COLORS: Record<ProtocolType, string> = {
+  'arp-request': 'var(--proto-arp)',
+  'arp-reply': 'var(--proto-arp)',
+  'icmp-echo': 'var(--proto-icmp)',
+  'icmp-reply': 'var(--proto-icmp)',
+  'tcp-syn': 'var(--proto-tcp)',
+  'tcp-syn-ack': 'var(--proto-tcp)',
+  'tcp-ack': 'var(--proto-tcp)',
+  'tcp-fin': 'var(--proto-tcp)',
+  'dns-query': 'var(--proto-dns)',
+  'dns-response': 'var(--proto-dns)',
+  'http-request': 'var(--proto-http)',
+  'http-response': 'var(--proto-http)',
+};
+
+export const PROTOCOL_SHORT_LABEL: Record<ProtocolType, string> = {
+  'arp-request': 'ARP?',
+  'arp-reply': 'ARP!',
+  'icmp-echo': 'PING',
+  'icmp-reply': 'PONG',
+  'tcp-syn': 'SYN',
+  'tcp-syn-ack': 'SYN/ACK',
+  'tcp-ack': 'ACK',
+  'tcp-fin': 'FIN',
+  'dns-query': 'DNS?',
+  'dns-response': 'DNS!',
+  'http-request': 'GET',
+  'http-response': 'HTTP',
 };

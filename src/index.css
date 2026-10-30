@@ -1,7 +1,143 @@
 @import "tailwindcss";
 
-html, body, #root {
+/* Semantic tokens are resolved at runtime from the palette blocks below. */
+@theme inline {
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line-1: var(--line-1);
+  --color-line-2: var(--line-2);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+
+  --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.28), 0 8px 24px rgb(0 0 0 / 0.18);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.32), 0 16px 40px rgb(0 0 0 / 0.24);
+}
+
+:root,
+[data-theme="dark"] {
+  --surface-0: #0a0e14;
+  --surface-1: #111722;
+  --surface-2: #18202d;
+  --surface-3: #202a3a;
+  --line-1: #24303f;
+  --line-2: #35455a;
+  --ink-1: #e8edf5;
+  --ink-2: #a4b1c2;
+  --ink-3: #6d7c91;
+  --accent: #3b82f6;
+  --accent-ink: #dbeafe;
+  --ok: #10b981;
+  --warn: #f59e0b;
+  --bad: #ef4444;
+  --grid-line: #1b2432;
+  --canvas-bg: #0a0e14;
+
+  --proto-arp: #f97316;
+  --proto-icmp: #22d3ee;
+  --proto-tcp: #3b82f6;
+  --proto-udp: #a78bfa;
+  --proto-dns: #c084fc;
+  --proto-http: #22c55e;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --surface-0: #eef1f6;
+  --surface-1: #f8fafc;
+  --surface-2: #ffffff;
+  --surface-3: #e6ebf3;
+  --line-1: #d5dce7;
+  --line-2: #b4c0d2;
+  --ink-1: #16202e;
+  --ink-2: #47576b;
+  --ink-3: #74849a;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --grid-line: #dbe2ec;
+  --canvas-bg: #f4f7fb;
+
+  --proto-arp: #ea580c;
+  --proto-icmp: #0891b2;
+  --proto-tcp: #2563eb;
+  --proto-udp: #7c3aed;
+  --proto-dns: #9333ea;
+  --proto-http: #16a34a;
+
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
   height: 100%;
   margin: 0;
   overflow: hidden;
+}
+
+body {
+  background: var(--surface-0);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border: 3px solid var(--surface-1);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+}
+
+@keyframes nlab-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.nlab-live {
+  animation: nlab-pulse 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nlab-live {
+    animation: none;
+  }
 }
