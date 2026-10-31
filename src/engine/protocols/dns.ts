@@ -1,76 +1,67 @@
-import type { NetworkNode, SimEvent, Packet } from '../../types/network';
-import { generateId } from '../../utils/mac';
+import type { NetworkNode, NetworkEdge, ProtocolEvent } from '../../types/network';
+import type { EngineOutcome } from '../forwarding';
+import { deviceWithIp, pdu, replyOf } from '../forwarding';
 
-export interface DnsResult {
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
+const DNS_PORT = 53;
+
+export function dnsOnSend(
+  event: ProtocolEvent,
+  sender: NetworkNode,
+  nodes: NetworkNode[],
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const target = deviceWithIp(event.packet.dstIp, nodes);
+  const label =
+    event.type === 'dns-query'
+      ? `Query "${event.packet.payload ?? 'unknown'}"`
+      : `Response "${event.packet.payload ?? ''}"`;
+  out.logs.push({
+    text: `[DNS] ${sender.label} → ${target?.label ?? event.packet.dstIp}: ${label} (UDP ${
+      event.packet.srcPort ?? '?'
+    } → ${event.packet.dstPort ?? DNS_PORT})`,
+    nodeId: sender.id,
+    packet: event.packet,
+  });
 }
 
-export function handleDnsQuery(
-  event: SimEvent,
+/** The server answers from the records it can actually see: the web servers in this topology. */
+export function dnsOnReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
   nodes: NetworkNode[],
-  currentTime: number,
-): DnsResult {
-  const result: DnsResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  if (event.type === 'dns-response') {
+    const peer = deviceWithIp(event.packet.srcIp, nodes);
+    out.logs.push({
+      text: `[DNS] ${holder.label} received answer: ${event.packet.payload ?? 'empty'} from ${
+        peer?.label ?? event.packet.srcIp
+      }`,
+      nodeId: holder.id,
+      packet: event.packet,
+    });
+    return;
+  }
 
   const hostname = event.packet.payload ?? 'unknown';
-  result.logs.push(`[DNS] ${srcNode.label} → ${dstNode.label}: Query "${hostname}"`);
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
-    packet: event.packet,
-  });
-
-  // Find the web server IP to resolve to
   const webServer = nodes.find((n) => n.type === 'web-server');
-  const resolvedIp = webServer?.interfaces[0]?.ip ?? '0.0.0.0';
+  const resolvedIp = webServer?.interfaces.find((iface) => iface.ip)?.ip;
+  const answer = resolvedIp ? `${hostname} → ${resolvedIp}` : `${hostname}: no A record in this topology`;
 
-  const responsePacket: Packet = {
-    id: generateId(),
-    srcMac: event.packet.dstMac,
-    dstMac: event.packet.srcMac,
-    srcIp: event.packet.dstIp,
-    dstIp: event.packet.srcIp,
-    protocol: 'dns-response',
-    ttl: 64,
-    payload: `${hostname} → ${resolvedIp}`,
-  };
-
-  result.newEvents.push({
-    id: generateId(),
-    time: currentTime + 1,
-    type: 'dns-response',
-    packet: responsePacket,
-    srcNodeId: dstNode.id,
-    dstNodeId: srcNode.id,
-  });
-
-  return result;
-}
-
-export function handleDnsResponse(
-  event: SimEvent,
-  nodes: NetworkNode[],
-): DnsResult {
-  const result: DnsResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
-
-  result.logs.push(
-    `[DNS] ${srcNode.label} → ${dstNode.label}: Response "${event.packet.payload}"`
+  out.newEvents.push(
+    pdu({
+      type: 'dns-response',
+      packet: replyOf(event, holder, {
+        type: 'dns-response',
+        payload: answer,
+        srcPort: DNS_PORT,
+        dstPort: event.packet.dstPort ?? 1024,
+      }),
+      holder,
+      nodes,
+      time: event.time + 1,
+    })
   );
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
-    packet: event.packet,
-  });
-
-  return result;
 }

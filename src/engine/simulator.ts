@@ -1,121 +1,139 @@
-import type { NetworkNode, NetworkEdge, SimEvent, Packet, TcpState } from '../types/network';
-import { findDirectEdge } from './routing';
-import { handleArpRequest, handleArpReply } from './protocols/arp';
-import { handleIcmpEcho, handleIcmpReply } from './protocols/icmp';
-import { handleTcpSyn, handleTcpSynAck, handleTcpAck } from './protocols/tcp';
-import { handleDnsQuery, handleDnsResponse } from './protocols/dns';
-import { handleHttpRequest, handleHttpResponse } from './protocols/http';
+import type { NetworkNode, NetworkEdge, ProtocolEvent, ForwardEvent } from '../types/network';
+import {
+  outcome,
+  findDevice,
+  isForDevice,
+  sendFromOrigin,
+  switchForward,
+  routerForward,
+  arrivalOf,
+} from './forwarding';
+import type { EngineOutcome } from './forwarding';
+import { arpOnSend, arpOnReceive } from './protocols/arp';
+import { icmpOnSend, icmpOnReceive } from './protocols/icmp';
+import { tcpOnSend, tcpOnReceive } from './protocols/tcp';
+import { udpOnSend, udpOnReceive } from './protocols/udp';
+import { dnsOnSend, dnsOnReceive } from './protocols/dns';
+import { httpOnSend, httpOnReceive } from './protocols/http';
 
-export interface SimulationResult {
-  arpMutations: Array<{ nodeId: string; arpEntry: { ip: string; mac: string } }>;
-  tcpMutations: Array<{ nodeId: string; tcpState: TcpState }>;
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
+export type { EngineOutcome } from './forwarding';
+
+function onSend(event: ProtocolEvent, holder: NetworkNode, nodes: NetworkNode[], edges: NetworkEdge[], out: EngineOutcome): void {
+  switch (event.type) {
+    case 'arp-request':
+    case 'arp-reply':
+      return arpOnSend(event, holder, nodes, edges, out);
+    case 'icmp-echo':
+    case 'icmp-reply':
+      return icmpOnSend(event, holder, nodes, edges, out);
+    case 'tcp-syn':
+    case 'tcp-syn-ack':
+    case 'tcp-ack':
+      return tcpOnSend(event, holder, nodes, edges, out);
+    case 'udp-datagram':
+    case 'udp-reply':
+      return udpOnSend(event, holder, nodes, edges, out);
+    case 'dns-query':
+    case 'dns-response':
+      return dnsOnSend(event, holder, nodes, edges, out);
+    case 'http-request':
+    case 'http-response':
+      return httpOnSend(event, holder, nodes, edges, out);
+  }
+}
+
+function onReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
+  nodes: NetworkNode[],
+  edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  switch (event.type) {
+    case 'arp-request':
+    case 'arp-reply':
+      return arpOnReceive(event, holder, nodes, edges, out);
+    case 'icmp-echo':
+    case 'icmp-reply':
+      return icmpOnReceive(event, holder, nodes, edges, out);
+    case 'tcp-syn':
+    case 'tcp-syn-ack':
+    case 'tcp-ack':
+      return tcpOnReceive(event, holder, nodes, edges, out);
+    case 'udp-datagram':
+    case 'udp-reply':
+      return udpOnReceive(event, holder, nodes, edges, out);
+    case 'dns-query':
+    case 'dns-response':
+      return dnsOnReceive(event, holder, nodes, edges, out);
+    case 'http-request':
+    case 'http-response':
+      return httpOnReceive(event, holder, nodes, edges, out);
+  }
+}
+
+/** A relayed frame reaching a device that speaks protocol: rebuild the PDU for its stack. */
+function handToStack(event: ForwardEvent, out: EngineOutcome): void {
+  out.newEvents.push(arrivalOf(event.resume, event.srcNodeId, event.time + 1));
 }
 
 export function processEvent(
-  event: SimEvent,
+  event: ForwardEvent | ProtocolEvent,
   nodes: NetworkNode[],
-  edges: NetworkEdge[],
-): SimulationResult {
-  const result: SimulationResult = {
-    arpMutations: [],
-    tcpMutations: [],
-    newEvents: [],
-    animations: [],
-    logs: [],
-  };
+  edges: NetworkEdge[]
+): EngineOutcome {
+  const out = outcome();
+  const holder = findDevice(event.srcNodeId, nodes);
+  if (!holder) return out;
 
-  const findEdge = (from: string, to: string) => findDirectEdge(from, to, edges);
+  const packet = event.kind === 'forward' ? event.resume.packet : event.packet;
 
-  switch (event.type) {
-    case 'arp-request': {
-      const arpResult = handleArpRequest(event, nodes, findEdge, event.time);
-      result.arpMutations.push(...arpResult.stateMutations);
-      result.newEvents.push(...arpResult.newEvents);
-      result.animations.push(...arpResult.animations);
-      result.logs.push(...arpResult.logs);
-      break;
+  if (isForDevice(holder, packet.dstIp)) {
+    if (event.kind === 'forward') {
+      handToStack(event, out);
+      return out;
     }
-    case 'arp-reply': {
-      const arpResult = handleArpReply(event, nodes);
-      result.arpMutations.push(...arpResult.stateMutations);
-      result.newEvents.push(...arpResult.newEvents);
-      result.animations.push(...arpResult.animations);
-      result.logs.push(...arpResult.logs);
-      break;
-    }
-    case 'icmp-echo': {
-      const icmpResult = handleIcmpEcho(event, nodes, event.time);
-      result.newEvents.push(...icmpResult.newEvents);
-      result.animations.push(...icmpResult.animations);
-      result.logs.push(...icmpResult.logs);
-      break;
-    }
-    case 'icmp-reply': {
-      const icmpResult = handleIcmpReply(event, nodes);
-      result.newEvents.push(...icmpResult.newEvents);
-      result.animations.push(...icmpResult.animations);
-      result.logs.push(...icmpResult.logs);
-      break;
-    }
-    case 'tcp-syn': {
-      const tcpResult = handleTcpSyn(event, nodes, event.time);
-      result.tcpMutations.push(...tcpResult.stateMutations);
-      result.newEvents.push(...tcpResult.newEvents);
-      result.animations.push(...tcpResult.animations);
-      result.logs.push(...tcpResult.logs);
-      break;
-    }
-    case 'tcp-syn-ack': {
-      const tcpResult = handleTcpSynAck(event, nodes, event.time);
-      result.tcpMutations.push(...tcpResult.stateMutations);
-      result.newEvents.push(...tcpResult.newEvents);
-      result.animations.push(...tcpResult.animations);
-      result.logs.push(...tcpResult.logs);
-      break;
-    }
-    case 'tcp-ack': {
-      const tcpResult = handleTcpAck(event, nodes);
-      result.tcpMutations.push(...tcpResult.stateMutations);
-      result.newEvents.push(...tcpResult.newEvents);
-      result.animations.push(...tcpResult.animations);
-      result.logs.push(...tcpResult.logs);
-      break;
-    }
-    case 'dns-query': {
-      const dnsResult = handleDnsQuery(event, nodes, event.time);
-      result.newEvents.push(...dnsResult.newEvents);
-      result.animations.push(...dnsResult.animations);
-      result.logs.push(...dnsResult.logs);
-      break;
-    }
-    case 'dns-response': {
-      const dnsResult = handleDnsResponse(event, nodes);
-      result.newEvents.push(...dnsResult.newEvents);
-      result.animations.push(...dnsResult.animations);
-      result.logs.push(...dnsResult.logs);
-      break;
-    }
-    case 'http-request': {
-      const httpResult = handleHttpRequest(event, nodes, event.time);
-      result.newEvents.push(...httpResult.newEvents);
-      result.animations.push(...httpResult.animations);
-      result.logs.push(...httpResult.logs);
-      break;
-    }
-    case 'http-response': {
-      const httpResult = handleHttpResponse(event, nodes);
-      result.newEvents.push(...httpResult.newEvents);
-      result.animations.push(...httpResult.animations);
-      result.logs.push(...httpResult.logs);
-      break;
-    }
-    default: {
-      result.logs.push(`[SIM] Unknown event type: ${event.type}`);
-    }
+    onReceive(event, holder, nodes, edges, out);
+    return out;
   }
 
-  return result;
+  // Anything this device created itself is transmitted, never relayed on.
+  if (event.kind === 'protocol' && event.originNodeId === holder.id) {
+    const sent = sendFromOrigin(holder, event, nodes, edges, out);
+    if (sent) onSend(sent, holder, nodes, edges, out);
+    return out;
+  }
+
+  if (holder.type === 'switch') {
+    switchForward(holder, asForward(event, holder), nodes, edges, out);
+    return out;
+  }
+
+  if (holder.type === 'router') {
+    routerForward(holder, asForward(event, holder), nodes, edges, out);
+    return out;
+  }
+
+  out.logs.push({
+    text: `[L2] ${holder.label} discards frame for ${packet.dstIp}`,
+    nodeId: holder.id,
+    packet,
+  });
+  return out;
+}
+
+/** End devices only ever hold protocol events; anything else arriving here is a relay. */
+function asForward(event: ProtocolEvent | ForwardEvent, holder: NetworkNode): ForwardEvent {
+  if (event.kind === 'forward') return event;
+  return {
+    kind: 'forward',
+    id: event.id,
+    time: event.time,
+    srcNodeId: holder.id,
+    dstNodeId: event.dstNodeId,
+    originNodeId: event.originNodeId,
+    path: [holder.id],
+    resume: event,
+    frame: { srcMac: event.packet.srcMac, dstMac: event.packet.dstMac },
+  };
 }

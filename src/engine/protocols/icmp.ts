@@ -1,74 +1,54 @@
-import type { NetworkNode, SimEvent, Packet } from '../../types/network';
-import { generateId } from '../../utils/mac';
+import type { NetworkNode, NetworkEdge, ProtocolEvent } from '../../types/network';
+import type { EngineOutcome } from '../forwarding';
+import { deviceWithIp, pdu, replyOf } from '../forwarding';
 
-export interface IcmpResult {
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
+export function icmpOnSend(
+  event: ProtocolEvent,
+  sender: NetworkNode,
+  nodes: NetworkNode[],
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const target = deviceWithIp(event.packet.dstIp, nodes);
+  const kind = event.type === 'icmp-echo' ? 'Echo Request (ping)' : 'Echo Reply (pong)';
+  out.logs.push({
+    text: `[ICMP] ${sender.label} → ${target?.label ?? event.packet.dstIp}: ${kind}`,
+    nodeId: sender.id,
+    packet: event.packet,
+  });
 }
 
-export function handleIcmpEcho(
-  event: SimEvent,
+export function icmpOnReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
   nodes: NetworkNode[],
-  currentTime: number,
-): IcmpResult {
-  const result: IcmpResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const peer = deviceWithIp(event.packet.srcIp, nodes);
 
-  result.logs.push(
-    `[ICMP] ${srcNode.label} → ${dstNode.label}: Echo Request (ping)`
-  );
+  if (event.type === 'icmp-reply') {
+    out.logs.push({
+      text: `[ICMP] ${holder.label} received Echo Reply from ${peer?.label ?? event.packet.srcIp}`,
+      nodeId: holder.id,
+      packet: event.packet,
+    });
+    return;
+  }
 
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
+  out.logs.push({
+    text: `[ICMP] ${holder.label} received Echo Request from ${peer?.label ?? event.packet.srcIp}`,
+    nodeId: holder.id,
     packet: event.packet,
   });
 
-  // Generate reply
-  const replyPacket: Packet = {
-    id: generateId(),
-    srcMac: event.packet.dstMac,
-    dstMac: event.packet.srcMac,
-    srcIp: event.packet.dstIp,
-    dstIp: event.packet.srcIp,
-    protocol: 'icmp-reply',
-    ttl: 64,
-    payload: 'Pong',
-  };
-
-  result.newEvents.push({
-    id: generateId(),
-    time: currentTime + 2,
-    type: 'icmp-reply',
-    packet: replyPacket,
-    srcNodeId: dstNode.id,
-    dstNodeId: srcNode.id,
-  });
-
-  return result;
-}
-
-export function handleIcmpReply(
-  event: SimEvent,
-  nodes: NetworkNode[],
-): IcmpResult {
-  const result: IcmpResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
-
-  result.logs.push(
-    `[ICMP] ${srcNode.label} → ${dstNode.label}: Echo Reply (pong)`
+  out.newEvents.push(
+    pdu({
+      type: 'icmp-reply',
+      packet: replyOf(event, holder, { type: 'icmp-reply', payload: 'Pong' }),
+      holder,
+      nodes,
+      time: event.time + 1,
+    })
   );
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
-    packet: event.packet,
-  });
-
-  return result;
 }

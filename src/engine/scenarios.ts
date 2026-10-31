@@ -1,166 +1,86 @@
-import type { NetworkNode, SimEvent, Packet } from '../types/network';
+import type { NetworkNode, NetworkInterface, ProtocolEvent, ProtocolType, Packet } from '../types/network';
 import { generateId } from '../utils/mac';
 
-export type ScenarioType = 'ping' | 'http-request' | 'dns-lookup';
+export type ScenarioType = 'ping' | 'http-request' | 'dns-lookup' | 'udp-echo';
 
 export interface Scenario {
   id: ScenarioType;
   label: string;
   description: string;
+  /** Device type the destination picker prefers for this scenario. */
+  prefers: 'host' | 'web-server' | 'dns-server';
 }
 
 export const SCENARIOS: Scenario[] = [
-  { id: 'ping', label: 'Ping', description: 'ICMP Echo Request/Reply (ARP → Ping)' },
-  { id: 'http-request', label: 'HTTP Request', description: 'ARP → TCP 3-Way Handshake → HTTP' },
-  { id: 'dns-lookup', label: 'DNS Lookup', description: 'DNS Query → Response' },
+  { id: 'ping', label: 'Ping', description: 'ICMP Echo Request/Reply — ARP resolves the next hop automatically', prefers: 'host' },
+  { id: 'http-request', label: 'HTTP Request', description: 'ARP → TCP 3-Way Handshake → HTTP GET → 200 OK', prefers: 'web-server' },
+  { id: 'dns-lookup', label: 'DNS Lookup', description: 'DNS Query → Response carried over UDP port 53', prefers: 'dns-server' },
+  { id: 'udp-echo', label: 'UDP Datagram', description: 'Connectionless datagram to UDP port 7 and its echo', prefers: 'host' },
 ];
 
-export function createPingScenario(
-  srcNode: NetworkNode,
-  dstNode: NetworkNode,
-): SimEvent[] {
-  const srcIface = srcNode.interfaces[0];
-  const dstIface = dstNode.interfaces[0];
-  if (!srcIface?.ip || !dstIface?.ip) return [];
-
-  const events: SimEvent[] = [];
-
-  // Step 1: ARP Request (broadcast to find dstNode's MAC)
-  const arpPacket: Packet = {
-    id: generateId(),
-    srcMac: srcIface.mac,
-    dstMac: 'FF:FF:FF:FF:FF:FF',
-    srcIp: srcIface.ip,
-    dstIp: dstIface.ip,
-    protocol: 'arp-request',
-    ttl: 1,
-    payload: `Who has ${dstIface.ip}?`,
-  };
-
-  events.push({
-    id: generateId(),
-    time: 0,
-    type: 'arp-request',
-    packet: arpPacket,
-    srcNodeId: srcNode.id,
-    dstNodeId: dstNode.id,
-  });
-
-  // Step 2: ICMP Echo (will be triggered after ARP completes - enqueue with delay)
-  const icmpPacket: Packet = {
-    id: generateId(),
-    srcMac: srcIface.mac,
-    dstMac: dstIface.mac,
-    srcIp: srcIface.ip,
-    dstIp: dstIface.ip,
-    protocol: 'icmp-echo',
-    ttl: 64,
-    payload: 'Ping',
-  };
-
-  events.push({
-    id: generateId(),
-    time: 3,
-    type: 'icmp-echo',
-    packet: icmpPacket,
-    srcNodeId: srcNode.id,
-    dstNodeId: dstNode.id,
-  });
-
-  return events;
+/** Devices that can create PDUs: they need at least one configured, connected IP interface. */
+export function addressableNodes(nodes: NetworkNode[]): NetworkNode[] {
+  return nodes.filter((n) => n.type !== 'switch' && n.type !== 'router' && !!egressInterface(n));
 }
 
-export function createHttpScenario(
-  srcNode: NetworkNode,
-  dstNode: NetworkNode,
-): SimEvent[] {
-  const srcIface = srcNode.interfaces[0];
-  const dstIface = dstNode.interfaces[0];
-  if (!srcIface?.ip || !dstIface?.ip) return [];
+function egressInterface(node: NetworkNode): NetworkInterface | undefined {
+  return (
+    node.interfaces.find((iface) => iface.ip && iface.connectedEdgeId) ??
+    node.interfaces.find((iface) => iface.ip)
+  );
+}
 
-  const events: SimEvent[] = [];
+export function addressOf(node: NetworkNode): string | undefined {
+  return egressInterface(node)?.ip;
+}
 
-  // ARP
-  events.push({
+let ephemeralPort = 49152;
+
+export function createScenarioEvents(
+  scenario: ScenarioType,
+  src: NetworkNode,
+  dst: NetworkNode
+): ProtocolEvent[] {
+  const srcIface = egressInterface(src);
+  const srcIp = srcIface?.ip;
+  const dstIp = addressOf(dst);
+  if (!srcIp || !dstIp || !srcIface) return [];
+
+  const base = (type: ProtocolType, patch: Partial<Packet> = {}): ProtocolEvent => ({
+    kind: 'protocol',
     id: generateId(),
     time: 0,
-    type: 'arp-request',
+    type,
+    srcNodeId: src.id,
+    dstNodeId: dst.id,
+    originNodeId: src.id,
+    path: [],
     packet: {
       id: generateId(),
       srcMac: srcIface.mac,
       dstMac: 'FF:FF:FF:FF:FF:FF',
-      srcIp: srcIface.ip,
-      dstIp: dstIface.ip,
-      protocol: 'arp-request',
-      ttl: 1,
+      srcIp,
+      dstIp,
+      protocol: type,
+      ttl: 64,
+      ...patch,
     },
-    srcNodeId: srcNode.id,
-    dstNodeId: dstNode.id,
   });
 
-  // TCP SYN (after ARP)
-  events.push({
-    id: generateId(),
-    time: 3,
-    type: 'tcp-syn',
-    packet: {
-      id: generateId(),
-      srcMac: srcIface.mac,
-      dstMac: dstIface.mac,
-      srcIp: srcIface.ip,
-      dstIp: dstIface.ip,
-      protocol: 'tcp-syn',
-      ttl: 64,
-    },
-    srcNodeId: srcNode.id,
-    dstNodeId: dstNode.id,
-  });
+  if (scenario === 'ping') {
+    return [base('icmp-echo', { payload: 'Ping' })];
+  }
 
-  // HTTP GET (after TCP handshake)
-  events.push({
-    id: generateId(),
-    time: 7,
-    type: 'http-request',
-    packet: {
-      id: generateId(),
-      srcMac: srcIface.mac,
-      dstMac: dstIface.mac,
-      srcIp: srcIface.ip,
-      dstIp: dstIface.ip,
-      protocol: 'http-request',
-      ttl: 64,
-      payload: 'GET /',
-    },
-    srcNodeId: srcNode.id,
-    dstNodeId: dstNode.id,
-  });
+  if (scenario === 'udp-echo') {
+    return [base('udp-datagram', { payload: 'Hello', srcPort: ephemeralPort++, dstPort: 7 })];
+  }
 
-  return events;
-}
+  if (scenario === 'dns-lookup') {
+    return [base('dns-query', { payload: 'www.example.com', srcPort: ephemeralPort++, dstPort: 53 })];
+  }
 
-export function createDnsScenario(
-  srcNode: NetworkNode,
-  dnsServer: NetworkNode,
-): SimEvent[] {
-  const srcIface = srcNode.interfaces[0];
-  const dnsIface = dnsServer.interfaces[0];
-  if (!srcIface?.ip || !dnsIface?.ip) return [];
-
-  return [{
-    id: generateId(),
-    time: 0,
-    type: 'dns-query',
-    packet: {
-      id: generateId(),
-      srcMac: srcIface.mac,
-      dstMac: dnsIface.mac,
-      srcIp: srcIface.ip,
-      dstIp: dnsIface.ip,
-      protocol: 'dns-query',
-      ttl: 64,
-      payload: 'www.example.com',
-    },
-    srcNodeId: srcNode.id,
-    dstNodeId: dnsServer.id,
-  }];
+  const clientPort = ephemeralPort++;
+  const get = base('http-request', { payload: '/', srcPort: clientPort, dstPort: 80 });
+  // The GET rides on the handshake: it is released by the source once the final ACK lands.
+  return [{ ...base('tcp-syn', { srcPort: clientPort, dstPort: 80 }), followUp: get }];
 }

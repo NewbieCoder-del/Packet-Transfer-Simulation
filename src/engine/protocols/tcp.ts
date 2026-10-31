@@ -1,117 +1,95 @@
-import type { NetworkNode, SimEvent, Packet, TcpState } from '../../types/network';
+import type { NetworkNode, NetworkEdge, ProtocolEvent } from '../../types/network';
+import type { EngineOutcome } from '../forwarding';
+import { deviceWithIp, pdu, replyOf } from '../forwarding';
 import { generateId } from '../../utils/mac';
 
-export interface TcpResult {
-  stateMutations: Array<{ nodeId: string; tcpState: TcpState }>;
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
+function ports(packet: ProtocolEvent['packet']): string {
+  if (packet.srcPort === undefined || packet.dstPort === undefined) return '';
+  return ` (${packet.srcPort} → ${packet.dstPort})`;
 }
 
-export function handleTcpSyn(
-  event: SimEvent,
+export function tcpOnSend(
+  event: ProtocolEvent,
+  sender: NetworkNode,
   nodes: NetworkNode[],
-  currentTime: number,
-): TcpResult {
-  const result: TcpResult = { stateMutations: [], newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
-
-  result.logs.push(`[TCP] ${srcNode.label} → ${dstNode.label}: SYN`);
-  result.stateMutations.push({ nodeId: srcNode.id, tcpState: 'SYN-SENT' });
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const target = deviceWithIp(event.packet.dstIp, nodes);
+  const flag = event.type === 'tcp-syn' ? 'SYN' : event.type === 'tcp-syn-ack' ? 'SYN-ACK' : 'ACK';
+  out.logs.push({
+    text: `[TCP] ${sender.label} → ${target?.label ?? event.packet.dstIp}: ${flag}${ports(event.packet)}`,
+    nodeId: sender.id,
     packet: event.packet,
   });
 
-  // Server responds with SYN-ACK
-  const synAckPacket: Packet = {
-    id: generateId(),
-    srcMac: event.packet.dstMac,
-    dstMac: event.packet.srcMac,
-    srcIp: event.packet.dstIp,
-    dstIp: event.packet.srcIp,
-    protocol: 'tcp-syn-ack',
-    ttl: 64,
-  };
-
-  result.newEvents.push({
-    id: generateId(),
-    time: currentTime + 1,
-    type: 'tcp-syn-ack',
-    packet: synAckPacket,
-    srcNodeId: dstNode.id,
-    dstNodeId: srcNode.id,
-  });
-
-  return result;
+  if (event.type === 'tcp-syn') {
+    out.tcpMutations.push({ nodeId: sender.id, tcpState: 'SYN-SENT' });
+  }
 }
 
-export function handleTcpSynAck(
-  event: SimEvent,
+export function tcpOnReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
   nodes: NetworkNode[],
-  currentTime: number,
-): TcpResult {
-  const result: TcpResult = { stateMutations: [], newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const peer = deviceWithIp(event.packet.srcIp, nodes);
+  const peerLabel = peer?.label ?? event.packet.srcIp;
 
-  result.logs.push(`[TCP] ${srcNode.label} → ${dstNode.label}: SYN-ACK`);
-  result.stateMutations.push({ nodeId: srcNode.id, tcpState: 'SYN-RECEIVED' });
+  if (event.type === 'tcp-syn') {
+    out.tcpMutations.push({ nodeId: holder.id, tcpState: 'SYN-RECEIVED' });
+    out.newEvents.push(
+      pdu({
+        type: 'tcp-syn-ack',
+        packet: replyOf(event, holder, {
+          type: 'tcp-syn-ack',
+          srcPort: event.packet.dstPort,
+          dstPort: event.packet.srcPort,
+        }),
+        holder,
+        nodes,
+        time: event.time + 1,
+        followUp: event.followUp,
+      })
+    );
+    return;
+  }
 
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
+  if (event.type === 'tcp-syn-ack') {
+    out.tcpMutations.push({ nodeId: holder.id, tcpState: 'ESTABLISHED' });
+    out.logs.push({
+      text: `[TCP] ${holder.label} received SYN-ACK from ${peerLabel} — connection ESTABLISHED`,
+      nodeId: holder.id,
+      packet: event.packet,
+    });
+    out.newEvents.push(
+      pdu({
+        type: 'tcp-ack',
+        packet: replyOf(event, holder, {
+          type: 'tcp-ack',
+          srcPort: event.packet.dstPort,
+          dstPort: event.packet.srcPort,
+        }),
+        holder,
+        nodes,
+        time: event.time + 1,
+        followUp: event.followUp,
+      })
+    );
+    return;
+  }
+
+  out.tcpMutations.push({ nodeId: holder.id, tcpState: 'ESTABLISHED' });
+  out.logs.push({
+    text: `[TCP] ${holder.label} received ACK from ${peerLabel} — connection ESTABLISHED`,
+    nodeId: holder.id,
     packet: event.packet,
   });
 
-  // Client responds with ACK
-  const ackPacket: Packet = {
-    id: generateId(),
-    srcMac: event.packet.dstMac,
-    dstMac: event.packet.srcMac,
-    srcIp: event.packet.dstIp,
-    dstIp: event.packet.srcIp,
-    protocol: 'tcp-ack',
-    ttl: 64,
-  };
-
-  result.newEvents.push({
-    id: generateId(),
-    time: currentTime + 1,
-    type: 'tcp-ack',
-    packet: ackPacket,
-    srcNodeId: dstNode.id,
-    dstNodeId: srcNode.id,
-  });
-
-  return result;
-}
-
-export function handleTcpAck(
-  event: SimEvent,
-  nodes: NetworkNode[],
-): TcpResult {
-  const result: TcpResult = { stateMutations: [], newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
-
-  result.logs.push(`[TCP] ${srcNode.label} → ${dstNode.label}: ACK — Connection ESTABLISHED`);
-  result.stateMutations.push(
-    { nodeId: srcNode.id, tcpState: 'ESTABLISHED' },
-    { nodeId: dstNode.id, tcpState: 'ESTABLISHED' },
-  );
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
-    packet: event.packet,
-  });
-
-  return result;
+  // Three-way handshake done: release whatever the session was waiting to send.
+  if (event.followUp && event.followUp.kind === 'protocol') {
+    out.newEvents.push({ ...event.followUp, id: generateId(), time: event.time + 1 });
+  }
 }

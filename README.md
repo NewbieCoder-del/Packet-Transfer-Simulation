@@ -8,12 +8,13 @@ topology editor and protocol engine are retained and extended rather than rewrit
 
 ## Overview
 
-The tool is inspired by Cisco Packet Tracer, but focuses on **visual understanding** rather than
-device configuration. ARP, ICMP, TCP, DNS and HTTP are modelled as state machines, and packet
-movement is animated across a topology you build yourself.
+The tool is inspired by Cisco Packet Tracer, but focuses on **visual understanding** of what
+happens on the wire. ARP, ICMP, TCP, UDP, DNS and HTTP are modelled as state machines, and every
+frame is forwarded hop by hop through the switches and routers of a topology you build yourself.
 
 - No server required — runs entirely in the browser
 - Drag-and-drop or click-to-place device placement
+- Interface addresses, default gateways and static routes are configured in the inspector
 - Resizable docks, dark and light themes, keyboard shortcuts
 - Step-by-step packet animation with protocol-specific colors
 - Live inspector showing interfaces, ARP / MAC / routing tables, TCP state and packet logs
@@ -66,7 +67,11 @@ Pick a scenario in the top toolbar — it starts immediately:
 |----------|------|
 | **Ping** | ARP Request → ARP Reply → ICMP Echo → ICMP Reply |
 | **HTTP Request** | ARP → TCP 3-Way Handshake → HTTP GET → HTTP Response |
-| **DNS Lookup** | DNS Query → DNS Response |
+| **DNS Lookup** | DNS Query → DNS Response over UDP port 53 |
+| **UDP Datagram** | Connectionless datagram to UDP port 7 and its echo |
+
+Source and target come from the **Traffic** dropdowns; leave them on *Auto* to let NetLab Studio pick
+a sensible pair from the current topology.
 
 ### 4. Control the simulation
 
@@ -75,11 +80,17 @@ Pick a scenario in the top toolbar — it starts immediately:
 - **Reset** — clear events and animated packets
 - **Speed** — 0.5x, 1x, 2x, 4x
 
-### 5. Inspect state
+### 5. Configure and inspect state
 
-Click a device or a link to open it in the right-hand panel: interfaces (name, MAC, IP, mask),
-ARP table, switch MAC table, routing table, TCP state, and the connection list. The bottom dock
-holds the packet log, filterable by protocol.
+Click a device or a link to open it in the right-hand panel. Interfaces show name, MAC and the
+peer on the other end of the port; the IPv4 and mask fields are editable and commit on blur or
+Enter, with validation for malformed addresses and duplicates. End devices also expose a default
+gateway, routers a static-route table. Below them sit the live ARP table, the switch MAC table and
+the TCP state.
+
+The bottom dock holds the packet log, filterable by protocol. Clicking a log row that carried a
+PDU opens the **packet inspector** — Ethernet II, ARP, IPv4, TCP/UDP and ICMP headers exactly as
+that device saw them.
 
 ### 6. Save and load
 
@@ -114,14 +125,15 @@ src/
 │   └── log-slice.ts           # Packet log entries
 ├── engine/
 │   ├── simulator.ts           # Event dispatcher (pure function)
+│   ├── forwarding.ts          # Per-hop delivery, ARP chaining, switching and routing
 │   ├── routing.ts             # Direct-edge lookup and BFS pathfinding
 │   ├── scenarios.ts           # Preset scenario generators
 │   └── protocols/             # Protocol state machines
-│       ├── arp.ts  icmp.ts  tcp.ts  dns.ts  http.ts
+│       ├── arp.ts  icmp.ts  tcp.ts  udp.ts  dns.ts  http.ts
 ├── components/
 │   ├── canvas/                # SVG canvas, device nodes, edges, packet animation
 │   ├── palette/               # Device library (drag source)
-│   ├── panel/                 # Inspector, packet log, packet dock
+│   ├── panel/                 # Inspector, packet log, packet inspector
 │   ├── toolbar/               # Simulation controls
 │   ├── layout/                # Title bar, status bar, resize handles
 │   └── common/                # Shared UI primitives and device glyphs
@@ -134,19 +146,31 @@ src/
 The engine runs on a **pure-function event loop**:
 
 ```
-processEvent(event, nodes, edges) → { arpMutations, tcpMutations, newEvents, animations, logs }
+processEvent(event, nodes, edges) → { arpMutations, macMutations, tcpMutations, newEvents, animations, logs }
 ```
 
-Each protocol handler receives one event and returns state changes plus follow-up events. The
-`useSimulation` hook drives the loop with `requestAnimationFrame`, coordinating event processing
-with packet animation timing. Theme and dock layout persist under a separate `netlab-prefs`
-LocalStorage key so they survive reloads without touching topology data.
+Each event names the device that currently **holds** the frame, so a switch or a router forwards one
+hop at a time instead of teleporting a packet to its final owner. Handlers return state changes plus
+follow-up events; `useSimulation` drives the loop with `requestAnimationFrame`, processing the next
+event only once the frames of the current hop have finished their animation. Theme and dock layout
+persist under a separate `netlab-prefs` LocalStorage key so they survive reloads without touching
+topology data.
 
 ## Known Limitations
 
-- Packet animation is currently drawn only between **directly connected** devices. A topology that
-  routes through a switch or a router produces correct protocol logs, but the intermediate hops are
-  not yet animated. Multi-hop forwarding is the subject of the next increment.
-- Interfaces are named and port-bound in the data model, but protocol handlers do not yet use
-  per-port forwarding decisions.
+- Forwarding is hop-by-hop and honest about failures — a frame with no route, no gateway, a dead
+  port or an exceeded TTL is dropped with a log line — but the model is still simplified:
+  ARP entries never age out, and there is no congestion, latency, bit-error or retransmission
+  modelling. Links are either up or down.
+- Switching has no spanning tree. A topology with a physical loop floods broadcasts until the
+  per-frame path guard discards them rather than converging to a loop-free topology.
+- Routing is connected-subnet plus static-route only: no dynamic protocols, NAT, DHCP, VLANs or
+  ACLs.
+- The DNS server answers a query with the first web server configured in the topology. There is no
+  zone data, recursion or negative caching.
+- TCP models the three-way handshake and carries one application PDU over it. There is no teardown
+  (`FIN`/`RST`), windowing or sequencing beyond the flags shown in the inspector.
+- Header fields shown in the packet inspector are the ones the engine actually uses; checksums,
+  options and fragmentation are not modelled.
+- LocalStorage holds a single topology slot plus UI preferences; there are no named profiles.
 - No automated test suite yet.

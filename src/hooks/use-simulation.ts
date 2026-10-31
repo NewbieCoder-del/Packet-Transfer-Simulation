@@ -9,6 +9,7 @@ const ANIMATION_DURATION = 1200; // ms per packet hop
 
 export function useSimulation() {
   const rafRef = useRef<number>(0);
+  const stepScheduled = useRef(false);
 
   const step = useCallback(() => {
     const store = useStore.getState();
@@ -26,25 +27,25 @@ export function useSimulation() {
 
       const result = processEvent(event, nodes, edges);
 
-      // Apply ARP mutations
-      for (const mut of result.arpMutations) {
-        useStore.setState((s) => ({
-          nodes: s.nodes.map((n) =>
-            n.id === mut.nodeId
-              ? { ...n, arpTable: { ...n.arpTable, [mut.arpEntry.ip]: mut.arpEntry.mac } }
-              : n
-          ),
-        }));
-      }
-
-      // Apply TCP mutations
-      for (const mut of result.tcpMutations) {
-        useStore.setState((s) => ({
-          nodes: s.nodes.map((n) =>
-            n.id === mut.nodeId ? { ...n, tcpState: mut.tcpState } : n
-          ),
-        }));
-      }
+      // Device tables and states are updated by the engine, not by the device itself.
+      useStore.setState((s) => ({
+        nodes: s.nodes.map((node) => {
+          const arp = result.arpMutations.filter((m) => m.nodeId === node.id);
+          const mac = result.macMutations.filter((m) => m.nodeId === node.id);
+          const tcp = result.tcpMutations.find((m) => m.nodeId === node.id);
+          if (arp.length === 0 && mac.length === 0 && !tcp) return node;
+          return {
+            ...node,
+            ...(arp.length > 0
+              ? { arpTable: { ...node.arpTable, ...Object.fromEntries(arp.map((m) => [m.ip, m.mac])) } }
+              : {}),
+            ...(mac.length > 0 && node.macTable !== undefined
+              ? { macTable: { ...node.macTable, ...Object.fromEntries(mac.map((m) => [m.entry.mac, m.entry])) } }
+              : {}),
+            ...(tcp ? { tcpState: tcp.tcpState } : {}),
+          };
+        }),
+      }));
 
       // Enqueue new events
       for (const newEvent of result.newEvents) {
@@ -53,7 +54,7 @@ export function useSimulation() {
 
       // Add logs
       for (const log of result.logs) {
-        store.addLog(event.time, log);
+        store.addLog(event.time, log.text, log.packet, log.nodeId);
       }
 
       // Create animations
@@ -77,7 +78,21 @@ export function useSimulation() {
     }
   }, []);
 
-  const animate = useCallback((timestamp: number) => {
+  /** One outstanding step at a time, and never while the run is paused or finished. */
+  const scheduleStep = useCallback(
+    (delay: number) => {
+      if (stepScheduled.current) return;
+      stepScheduled.current = true;
+      setTimeout(() => {
+        stepScheduled.current = false;
+        const state = useStore.getState().simState;
+        if (state === 'running' || state === 'stepping') step();
+      }, delay);
+    },
+    [step]
+  );
+
+  const animate = useCallback(function frame(timestamp: number) {
     const store = useStore.getState();
     if (store.simState !== 'running' && store.simState !== 'stepping') return;
 
@@ -97,19 +112,27 @@ export function useSimulation() {
     }
 
     if (allDone && activePackets.length > 0) {
-      // All animations done, process next event
+      // Every animation for this hop is done, so the next event can go out.
       if (store.simState === 'stepping') {
         store.setSimState('paused');
       } else {
         // Small delay before next event
-        setTimeout(() => step(), 200);
+        scheduleStep(200);
+      }
+    } else if (activePackets.length === 0) {
+      if (store.eventQueue.length > 0) {
+        // The last event left no frame on the wire — it only started an ARP resolution —
+        // so waiting for an animation to finish would stall the run.
+        scheduleStep(60);
+      } else if (store.simState === 'running') {
+        store.setSimState('idle');
       }
     }
 
     if (store.simState === 'running' || store.activePackets.length > 0) {
-      rafRef.current = requestAnimationFrame(animate);
+      rafRef.current = requestAnimationFrame(frame);
     }
-  }, [step]);
+  }, [scheduleStep]);
 
   const start = useCallback(() => {
     const store = useStore.getState();
@@ -143,9 +166,14 @@ export function useSimulation() {
     const store = useStore.getState();
     store.resetSimulation();
     store.clearLogs();
-    // Reset TCP states
+    // Learned tables and connection state belong to a run, not to the configuration.
     useStore.setState((s) => ({
-      nodes: s.nodes.map((n) => ({ ...n, tcpState: undefined, arpTable: {} })),
+      nodes: s.nodes.map((n) => ({
+        ...n,
+        tcpState: undefined,
+        arpTable: {},
+        ...(n.macTable ? { macTable: {} } : {}),
+      })),
     }));
   }, []);
 

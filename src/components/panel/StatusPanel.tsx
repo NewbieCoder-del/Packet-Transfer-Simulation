@@ -1,9 +1,18 @@
 import { useState } from 'react';
 import { useStore } from '../../store';
-import { DEVICE_DEFAULTS, DEVICE_ORDER, type NetworkNode } from '../../types/network';
-import { isSameSubnet } from '../../utils/ip';
+import {
+  DEVICE_DEFAULTS,
+  DEVICE_ORDER,
+  type NetworkInterface,
+  type NetworkNode,
+} from '../../types/network';
+import { isValidIpv4, isValidSubnetMask, maskToPrefix, isSameSubnet } from '../../utils/ip';
 import DeviceIcon from '../common/DeviceIcon';
 import { Badge, Button, Card, KeyValue, SectionTitle } from '../common/ui';
+
+const inputClass =
+  'w-full rounded-sm border border-line-1 bg-surface-2 px-1.5 py-1 font-mono text-[11px] text-ink-1 ' +
+  'hover:border-line-2 focus:border-accent focus:outline-none';
 
 function TableCard({ rows, empty }: { rows: [string, string][]; empty: string }) {
   return (
@@ -11,14 +20,277 @@ function TableCard({ rows, empty }: { rows: [string, string][]; empty: string })
       {rows.length === 0 ? (
         <p className="px-2.5 py-2 text-[11px] text-ink-3">{empty}</p>
       ) : (
-        rows.map(([k, v]) => (
-          <div key={k} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+        rows.map(([k, v], i) => (
+          <div key={`${k}-${i}`} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
             <span className="font-mono text-[11px] text-ink-1">{k}</span>
             <span className="font-mono text-[11px] text-ink-2">{v}</span>
           </div>
         ))
       )}
     </Card>
+  );
+}
+
+function ErrorNote({ text }: { text: string }) {
+  return <p className="pt-1 text-[10px] leading-snug text-bad">{text}</p>;
+}
+
+function InterfaceCard({ node, iface }: { node: NetworkNode; iface: NetworkInterface }) {
+  const nodes = useStore((s) => s.nodes);
+  const edges = useStore((s) => s.edges);
+  const setInterfaceAddress = useStore((s) => s.setInterfaceAddress);
+
+  const layer3 = DEVICE_DEFAULTS[node.type].layer3;
+  const [ip, setIp] = useState(iface.ip ?? '');
+  const [mask, setMask] = useState(iface.subnetMask ?? '255.255.255.0');
+  const [error, setError] = useState<string | null>(null);
+
+  const edge = edges.find((e) => e.id === iface.connectedEdgeId);
+  const peerId = edge && (edge.from.nodeId === node.id ? edge.to.nodeId : edge.from.nodeId);
+  const peer = nodes.find((n) => n.id === peerId);
+  const up = edge?.status ?? null;
+
+  const commit = () => {
+    const nextIp = ip.trim();
+    const nextMask = mask.trim();
+    if (!isValidIpv4(nextIp)) {
+      setError('Not a valid IPv4 address (e.g. 192.168.1.10)');
+      return;
+    }
+    if (!isValidSubnetMask(nextMask)) {
+      setError('Not a valid subnet mask (contiguous bits, e.g. 255.255.255.0)');
+      return;
+    }
+    if (!setInterfaceAddress(node.id, iface.id, nextIp, nextMask)) {
+      setError('Another interface already uses this address');
+      return;
+    }
+    setError(null);
+  };
+
+  return (
+    <Card className="px-2.5 py-2">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="truncate text-[11px] font-semibold text-ink-2">{iface.name}</span>
+        {edge ? (
+          <Badge tone={up === 'up' ? 'ok' : 'bad'}>{peer?.label ?? 'link'}</Badge>
+        ) : (
+          <Badge tone="neutral">{"free"}</Badge>
+        )}
+      </div>
+      <KeyValue k={"MAC"} v={iface.mac} mono />
+
+      {layer3 ? (
+        <div className="mt-1.5 flex flex-col gap-1.5">
+          <label className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-[10px] uppercase tracking-wide text-ink-3">{"IPv4"}</span>
+            <input
+              value={ip}
+              onChange={(e) => setIp(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              placeholder="0.0.0.0"
+              aria-label={`IP address of ${iface.name}`}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-[10px] uppercase tracking-wide text-ink-3">{"Mask"}</span>
+            <input
+              value={mask}
+              onChange={(e) => setMask(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+              placeholder="255.255.255.0"
+              aria-label={`Subnet mask of ${iface.name}`}
+              className={inputClass}
+            />
+          </label>
+          {ip && mask && isValidIpv4(ip.trim()) && isValidSubnetMask(mask.trim()) && (
+            <p className="text-[10px] text-ink-3">
+              {`/${maskToPrefix(mask.trim())} · network ${(ip.trim().split('.').slice(0, 3).join('.'))}`}
+            </p>
+          )}
+          {error && <ErrorNote text={error} />}
+        </div>
+      ) : (
+        <p className="pt-0.5 text-[11px] text-ink-3">{"Layer 2 port - switching only, no IP address"}</p>
+      )}
+    </Card>
+  );
+}
+
+function GatewayField({ node }: { node: NetworkNode }) {
+  const nodes = useStore((s) => s.nodes);
+  const setGateway = useStore((s) => s.setGateway);
+  const [value, setValue] = useState(node.gateway ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const commit = () => {
+    const next = value.trim();
+    if (!next) {
+      setGateway(node.id, undefined);
+      setError(null);
+      return;
+    }
+    if (!isValidIpv4(next)) {
+      setError('Not a valid IPv4 address');
+      return;
+    }
+    const router = nodes.find((n) => n.interfaces.some((iface) => iface.ip === next));
+    if (!router) {
+      setError('No device in this topology owns that address');
+      return;
+    }
+    setGateway(node.id, next);
+    setError(null);
+  };
+
+  return (
+    <div>
+      <SectionTitle>{"Default Gateway"}</SectionTitle>
+      <Card className="px-2.5 py-2">
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+          placeholder={"none - clears when empty"}
+          aria-label="Default gateway"
+          className={inputClass}
+        />
+        <p className="pt-1 text-[10px] leading-snug text-ink-3">
+          {"Off-subnet traffic is sent here. Set it to the router interface on this device's subnet."}
+        </p>
+        {error && <ErrorNote text={error} />}
+      </Card>
+    </div>
+  );
+}
+
+function StaticRoutes({ node }: { node: NetworkNode }) {
+  const addRoute = useStore((s) => s.addRoute);
+  const removeRoute = useStore((s) => s.removeRoute);
+  const [destination, setDestination] = useState('');
+  const [mask, setMask] = useState('255.255.255.0');
+  const [gateway, setGateway] = useState('');
+  const [interfaceId, setInterfaceId] = useState(node.interfaces.find((i) => i.ip)?.id ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const rows = (node.routingTable ?? []).map(
+    (r) =>
+      [
+        `${r.destination}/${maskToPrefix(r.mask)}`,
+        `via ${r.gateway} · ${node.interfaces.find((i) => i.id === r.interfaceId)?.name ?? '?'}`,
+      ] as [string, string]
+  );
+
+  const submit = () => {
+    if (!isValidIpv4(destination.trim())) {
+      setError('Destination must be a valid network address');
+      return;
+    }
+    if (!isValidSubnetMask(mask.trim())) {
+      setError('Mask must be contiguous, e.g. 255.255.255.0');
+      return;
+    }
+    if (!isValidIpv4(gateway.trim())) {
+      setError('Next-hop gateway must be a valid IPv4 address');
+      return;
+    }
+    const egress = node.interfaces.find((iface) => iface.id === interfaceId);
+    if (!egress) {
+      setError('Pick the outgoing interface for this route');
+      return;
+    }
+    addRoute(node.id, {
+      destination: destination.trim(),
+      mask: mask.trim(),
+      gateway: gateway.trim(),
+      interfaceId,
+    });
+    setDestination('');
+    setGateway('');
+    setError(null);
+  };
+
+  return (
+    <div>
+      <SectionTitle right={<span className="font-mono text-[10px] text-ink-3">{rows.length}</span>}>
+        {"Static Routes"}
+      </SectionTitle>
+      <Card className="divide-y divide-line-1">
+        {rows.length === 0 ? (
+          <p className="px-2.5 py-2 text-[11px] text-ink-3">
+            {"No static routes. Connected subnets always win over these entries."}
+          </p>
+        ) : (
+          rows.map((row, i) => (
+            <div key={`${row[0]}-${i}`} className="flex items-center gap-2 px-2.5 py-1.5">
+              <span className="min-w-0 flex-1 font-mono text-[11px] text-ink-1">{row[0]}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-2">{row[1]}</span>
+              <button
+                onClick={() => removeRoute(node.id, i)}
+                aria-label={`Remove route to ${row[0]}`}
+                className="shrink-0 rounded-xs border border-line-1 px-1 text-[10px] text-ink-3 hover:border-bad hover:text-bad"
+              >
+                {"×"}
+              </button>
+            </div>
+          ))
+        )}
+      </Card>
+
+      <div className="mt-2 flex flex-col gap-1.5 rounded-md border border-line-1 bg-surface-2 p-2">
+        <div className="flex gap-1.5">
+          <input
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            placeholder={"network, e.g. 10.1.1.0"}
+            aria-label="Route destination network"
+            className={inputClass}
+          />
+          <input
+            value={mask}
+            onChange={(e) => setMask(e.target.value)}
+            placeholder={"mask"}
+            aria-label="Route destination mask"
+            className={`${inputClass} w-28 shrink-0`}
+          />
+        </div>
+        <div className="flex gap-1.5">
+          <input
+            value={gateway}
+            onChange={(e) => setGateway(e.target.value)}
+            placeholder={"next hop, e.g. 192.168.9.2"}
+            aria-label="Route next-hop gateway"
+            className={inputClass}
+          />
+          <select
+            value={interfaceId}
+            onChange={(e) => setInterfaceId(e.target.value)}
+            aria-label="Route outgoing interface"
+            className={`${inputClass} w-32 shrink-0`}
+          >
+            {node.interfaces.map((iface) => (
+              <option key={iface.id} value={iface.id}>
+                {iface.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <Button block onClick={submit}>
+          {"Add static route"}
+        </Button>
+        {error && <ErrorNote text={error} />}
+      </div>
+    </div>
   );
 }
 
@@ -30,6 +302,7 @@ function DeviceInspector({ node }: { node: NetworkNode }) {
   const selectEdge = useStore((s) => s.selectEdge);
 
   const meta = DEVICE_DEFAULTS[node.type];
+  const isEndDevice = node.type !== 'switch' && node.type !== 'router';
   const [name, setName] = useState(node.label);
   const [nameKey, setNameKey] = useState(node.id);
   if (nameKey !== node.id) {
@@ -39,9 +312,8 @@ function DeviceInspector({ node }: { node: NetworkNode }) {
 
   const links = edges.filter((e) => e.from.nodeId === node.id || e.to.nodeId === node.id);
   const arpRows = Object.entries(node.arpTable).map(([ip, mac]) => [ip, mac] as [string, string]);
-  const macRows = Object.entries(node.macTable ?? {}).map(([mac, port]) => [mac, port] as [string, string]);
-  const routeRows = (node.routingTable ?? []).map(
-    (r) => [`${r.destination}/${r.mask}`, `${r.gateway} · ${r.interfaceId}`] as [string, string]
+  const macRows = Object.entries(node.macTable ?? {}).map(
+    ([mac, entry]) => [mac, node.interfaces.find((i) => i.id === entry.interfaceId)?.name ?? 'port'] as [string, string]
   );
 
   return (
@@ -78,28 +350,19 @@ function DeviceInspector({ node }: { node: NetworkNode }) {
       <div>
         <SectionTitle>{"Interfaces"}</SectionTitle>
         <div className="flex flex-col gap-1.5">
-          {node.interfaces.map((iface, idx) => (
-            <Card key={iface.id} className="px-2.5 py-2">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-ink-2">
-                  {"Port"} {idx + 1}
-                </span>
-                <span className="font-mono text-[10px] text-ink-3">{iface.id.slice(0, 6)}</span>
-              </div>
-              <KeyValue k={"MAC"} v={iface.mac} mono />
-              {iface.ip && <KeyValue k={"IP"} v={iface.ip} mono />}
-              {iface.subnetMask && <KeyValue k={"Mask"} v={iface.subnetMask} mono />}
-              {!iface.ip && <p className="pt-0.5 text-[11px] text-ink-3">{'Layer 2 port - no IP address'}</p>}
-            </Card>
+          {node.interfaces.map((iface) => (
+            <InterfaceCard key={`${node.id}-${iface.id}`} node={node} iface={iface} />
           ))}
         </div>
       </div>
+
+      {isEndDevice && <GatewayField key={`gw-${node.id}`} node={node} />}
 
       <div>
         <SectionTitle right={<span className="font-mono text-[10px] text-ink-3">{arpRows.length}</span>}>
           {"ARP Table"}
         </SectionTitle>
-        <TableCard rows={arpRows} empty={"No entries yet"} />
+        <TableCard rows={arpRows} empty={"Empty - a scenario resolves the next hop on first use"} />
       </div>
 
       {node.macTable && (
@@ -107,16 +370,11 @@ function DeviceInspector({ node }: { node: NetworkNode }) {
           <SectionTitle right={<span className="font-mono text-[10px] text-ink-3">{macRows.length}</span>}>
             {"MAC Address Table"}
           </SectionTitle>
-          <TableCard rows={macRows} empty={"No learned entries yet — switching is enabled in Phase 3"} />
+          <TableCard rows={macRows} empty={"No learned entries yet - run traffic through this switch"} />
         </div>
       )}
 
-      {node.routingTable && (
-        <div>
-          <SectionTitle>{"Routing Table"}</SectionTitle>
-          <TableCard rows={routeRows} empty={"No entries yet"} />
-        </div>
-      )}
+      {node.routingTable && <StaticRoutes key={`routes-${node.id}`} node={node} />}
 
       {node.tcpState && (
         <div>

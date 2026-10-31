@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useStore } from '../../store';
 import { useSimulation } from '../../hooks/use-simulation';
-import { SCENARIOS, createPingScenario, createHttpScenario, createDnsScenario } from '../../engine/scenarios';
-import type { ScenarioType } from '../../engine/scenarios';
+import { SCENARIOS, addressableNodes, addressOf, createScenarioEvents } from '../../engine/scenarios';
+import type { Scenario } from '../../engine/scenarios';
 import { loadTopology } from '../../utils/storage';
 
 const PlayIcon = (
@@ -40,6 +40,9 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
 
 const Divider = () => <div className="h-5 w-px bg-line-1" />;
 
+const selectClass =
+  'max-w-[130px] rounded-sm border border-line-1 bg-surface-2 px-1.5 py-1.5 text-[11px] text-ink-1 hover:border-line-2 focus:border-accent';
+
 export default function SimulationToolbar() {
   const nodes = useStore((s) => s.nodes);
   const simState = useStore((s) => s.simState);
@@ -51,39 +54,34 @@ export default function SimulationToolbar() {
   const { start, pause, resume, stepOnce, reset } = useSimulation();
   const [flash, setFlash] = useState<string | null>(null);
   const [hasSaved, setHasSaved] = useState(() => Boolean(loadTopology()));
+  const [fromId, setFromId] = useState('');
+  const [toId, setToId] = useState('');
 
   const notify = (message: string) => {
     setFlash(message);
     window.setTimeout(() => setFlash((current) => (current === message ? null : current)), 2200);
   };
 
-  const launchScenario = (scenarioId: ScenarioType) => {
-    const hosts = nodes.filter((n) => n.type === 'host');
-    const webServers = nodes.filter((n) => n.type === 'web-server');
-    const dnsServers = nodes.filter((n) => n.type === 'dns-server');
+  const candidates = addressableNodes(nodes);
 
-    let events: ReturnType<typeof createPingScenario> = [];
+  const launchScenario = (scenario: Scenario) => {
+    const src =
+      candidates.find((n) => n.id === fromId) ??
+      candidates.find((n) => n.type === 'host') ??
+      candidates[0];
+    const dst =
+      candidates.find((n) => n.id === toId) ??
+      candidates.find((n) => n.type === scenario.prefers && n.id !== src?.id) ??
+      candidates.find((n) => n.id !== src?.id);
 
-    if (scenarioId === 'ping') {
-      if (hosts.length < 2) {
-        const src = hosts[0];
-        const dst = nodes.find((n) => n.id !== src?.id && n.type !== 'switch');
-        if (src && dst) events = createPingScenario(src, dst);
-      } else {
-        events = createPingScenario(hosts[0], hosts[1]);
-      }
-    } else if (scenarioId === 'http-request') {
-      const src = hosts[0];
-      const dst = webServers[0];
-      if (src && dst) events = createHttpScenario(src, dst);
-    } else if (scenarioId === 'dns-lookup') {
-      const src = hosts[0];
-      const dns = dnsServers[0];
-      if (src && dns) events = createDnsScenario(src, dns);
+    if (!src || !dst || src.id === dst.id) {
+      notify("Need two configured devices - set an IP on the Interfaces tab");
+      return;
     }
 
+    const events = createScenarioEvents(scenario.id, src, dst);
     if (events.length === 0) {
-      notify("This scenario needs the matching devices");
+      notify(`${src.label} or ${dst.label} has no IP address on a connected port`);
       return;
     }
 
@@ -96,11 +94,43 @@ export default function SimulationToolbar() {
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 overflow-x-auto border-b border-line-1 bg-surface-1 px-3">
+      <Group label={"Traffic"}>
+        <select
+          aria-label="Source device"
+          value={fromId}
+          onChange={(e) => setFromId(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">{"Auto source"}</option>
+          {candidates.map((n) => (
+            <option key={n.id} value={n.id}>
+              {`${n.label} (${addressOf(n)})`}
+            </option>
+          ))}
+        </select>
+        <span className="text-[10px] text-ink-3">→</span>
+        <select
+          aria-label="Destination device"
+          value={toId}
+          onChange={(e) => setToId(e.target.value)}
+          className={selectClass}
+        >
+          <option value="">{"Auto target"}</option>
+          {candidates.map((n) => (
+            <option key={n.id} value={n.id}>
+              {`${n.label} (${addressOf(n)})`}
+            </option>
+          ))}
+        </select>
+      </Group>
+
+      <Divider />
+
       <Group label={"Scenario"}>
         {SCENARIOS.map((s) => (
           <button
             key={s.id}
-            onClick={() => launchScenario(s.id)}
+            onClick={() => launchScenario(s)}
             disabled={!canRun}
             title={s.description}
             className="rounded-sm border border-line-1 bg-surface-2 px-2.5 py-1.5 text-[11px] font-medium text-ink-1

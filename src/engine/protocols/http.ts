@@ -1,73 +1,69 @@
-import type { NetworkNode, SimEvent, Packet } from '../../types/network';
-import { generateId } from '../../utils/mac';
+import type { NetworkNode, NetworkEdge, ProtocolEvent } from '../../types/network';
+import type { EngineOutcome } from '../forwarding';
+import { deviceWithIp, pdu, replyOf } from '../forwarding';
 
-export interface HttpResult {
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
+const HTTP_PORT = 80;
+
+function path(event: ProtocolEvent): string {
+  return event.packet.payload ?? '/';
 }
 
-export function handleHttpRequest(
-  event: SimEvent,
+export function httpOnSend(
+  event: ProtocolEvent,
+  sender: NetworkNode,
   nodes: NetworkNode[],
-  currentTime: number,
-): HttpResult {
-  const result: HttpResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
-
-  result.logs.push(
-    `[HTTP] ${srcNode.label} → ${dstNode.label}: GET ${event.packet.payload ?? '/'}`
-  );
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  const target = deviceWithIp(event.packet.dstIp, nodes);
+  const text =
+    event.type === 'http-request'
+      ? `GET ${path(event)}`
+      : `${event.packet.payload ?? 'Response'}`;
+  out.logs.push({
+    text: `[HTTP] ${sender.label} → ${target?.label ?? event.packet.dstIp}: ${text} (TCP ${
+      event.packet.srcPort ?? '?'
+    } → ${event.packet.dstPort ?? HTTP_PORT})`,
+    nodeId: sender.id,
     packet: event.packet,
   });
-
-  const responsePacket: Packet = {
-    id: generateId(),
-    srcMac: event.packet.dstMac,
-    dstMac: event.packet.srcMac,
-    srcIp: event.packet.dstIp,
-    dstIp: event.packet.srcIp,
-    protocol: 'http-response',
-    ttl: 64,
-    payload: '200 OK',
-  };
-
-  result.newEvents.push({
-    id: generateId(),
-    time: currentTime + 1,
-    type: 'http-response',
-    packet: responsePacket,
-    srcNodeId: dstNode.id,
-    dstNodeId: srcNode.id,
-  });
-
-  return result;
 }
 
-export function handleHttpResponse(
-  event: SimEvent,
+/** The web server answers every request for its root document. */
+export function httpOnReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
   nodes: NetworkNode[],
-): HttpResult {
-  const result: HttpResult = { newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  if (!srcNode || !dstNode) return result;
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  if (event.type === 'http-response') {
+    const peer = deviceWithIp(event.packet.srcIp, nodes);
+    out.logs.push({
+      text: `[HTTP] ${holder.label} received ${event.packet.payload ?? 'response'} from ${
+        peer?.label ?? event.packet.srcIp
+      }`,
+      nodeId: holder.id,
+      packet: event.packet,
+    });
+    return;
+  }
 
-  result.logs.push(
-    `[HTTP] ${srcNode.label} → ${dstNode.label}: ${event.packet.payload ?? 'Response'}`
+  const requested = path(event);
+  const body = requested === '/' || requested === '/index.html' ? '200 OK' : '404 Not Found';
+
+  out.newEvents.push(
+    pdu({
+      type: 'http-response',
+      packet: replyOf(event, holder, {
+        type: 'http-response',
+        payload: body,
+        srcPort: event.packet.dstPort ?? HTTP_PORT,
+        dstPort: event.packet.srcPort ?? 1024,
+      }),
+      holder,
+      nodes,
+      time: event.time + 1,
+    })
   );
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
-    packet: event.packet,
-  });
-
-  return result;
 }

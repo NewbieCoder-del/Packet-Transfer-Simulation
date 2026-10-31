@@ -1,90 +1,62 @@
-import type { NetworkNode, SimEvent, Packet } from '../../types/network';
+import type { NetworkNode, NetworkEdge, ProtocolEvent } from '../../types/network';
+import type { EngineOutcome } from '../forwarding';
+import { deviceWithIp, pdu, replyOf } from '../forwarding';
 import { generateId } from '../../utils/mac';
 
-export interface ArpResult {
-  stateMutations: Array<{ nodeId: string; arpEntry: { ip: string; mac: string } }>;
-  newEvents: SimEvent[];
-  animations: Array<{ fromNodeId: string; toNodeId: string; packet: Packet }>;
-  logs: string[];
-}
-
-export function handleArpRequest(
-  event: SimEvent,
+export function arpOnSend(
+  event: ProtocolEvent,
+  sender: NetworkNode,
   nodes: NetworkNode[],
-  findEdgePath: (fromId: string, toId: string) => string | null,
-  currentTime: number,
-): ArpResult {
-  const result: ArpResult = { stateMutations: [], newEvents: [], animations: [], logs: [] };
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  if (!srcNode) return result;
-
-  const targetIp = event.packet.dstIp;
-  result.logs.push(
-    `[ARP] ${srcNode.label} broadcasts: Who has ${targetIp}? Tell ${event.packet.srcIp}`
-  );
-
-  // Broadcast to all directly connected nodes
-  const connectedNodes = nodes.filter((n) => n.id !== srcNode.id && findEdgePath(srcNode.id, n.id));
-
-  for (const neighbor of connectedNodes) {
-    result.animations.push({
-      fromNodeId: srcNode.id,
-      toNodeId: neighbor.id,
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  if (event.type === 'arp-request') {
+    out.logs.push({
+      text: `[ARP] ${sender.label} broadcasts: Who has ${event.packet.dstIp}? Tell ${event.packet.srcIp}`,
+      nodeId: sender.id,
       packet: event.packet,
     });
-
-    // Check if neighbor has the target IP
-    const targetIface = neighbor.interfaces.find((iface) => iface.ip === targetIp);
-    if (targetIface) {
-      const replyMac = targetIface.mac;
-      const replyPacket: Packet = {
-        id: generateId(),
-        srcMac: replyMac,
-        dstMac: event.packet.srcMac,
-        srcIp: targetIp,
-        dstIp: event.packet.srcIp,
-        protocol: 'arp-reply',
-        ttl: 64,
-        payload: `MAC=${replyMac}`,
-      };
-
-      result.newEvents.push({
-        id: generateId(),
-        time: currentTime + 1,
-        type: 'arp-reply',
-        packet: replyPacket,
-        srcNodeId: neighbor.id,
-        dstNodeId: srcNode.id,
-      });
-    }
+    return;
   }
-
-  return result;
+  const target = deviceWithIp(event.packet.dstIp, nodes);
+  out.logs.push({
+    text: `[ARP] ${sender.label} replies to ${target?.label ?? event.packet.dstIp}: ${event.packet.srcIp} is at ${event.packet.srcMac}`,
+    nodeId: sender.id,
+    packet: event.packet,
+  });
 }
 
-export function handleArpReply(
-  event: SimEvent,
+export function arpOnReceive(
+  event: ProtocolEvent,
+  holder: NetworkNode,
   nodes: NetworkNode[],
-): ArpResult {
-  const result: ArpResult = { stateMutations: [], newEvents: [], animations: [], logs: [] };
-  const dstNode = nodes.find((n) => n.id === event.dstNodeId);
-  const srcNode = nodes.find((n) => n.id === event.srcNodeId);
-  if (!dstNode || !srcNode) return result;
+  _edges: NetworkEdge[],
+  out: EngineOutcome
+): void {
+  if (event.type === 'arp-request') {
+    const reply = replyOf(event, holder, { type: 'arp-reply', ttl: 1 });
+    out.newEvents.push(
+      pdu({
+        type: 'arp-reply',
+        packet: { ...reply, payload: `${reply.srcIp} is at ${reply.srcMac}` },
+        holder,
+        nodes,
+        time: event.time + 1,
+        pending: event.pending,
+      })
+    );
+    return;
+  }
 
-  result.logs.push(
-    `[ARP] ${srcNode.label} replies to ${dstNode.label}: ${event.packet.srcIp} is at ${event.packet.srcMac}`
-  );
-
-  result.stateMutations.push({
-    nodeId: dstNode.id,
-    arpEntry: { ip: event.packet.srcIp, mac: event.packet.srcMac },
-  });
-
-  result.animations.push({
-    fromNodeId: srcNode.id,
-    toNodeId: dstNode.id,
+  out.arpMutations.push({ nodeId: holder.id, ip: event.packet.srcIp, mac: event.packet.srcMac });
+  out.logs.push({
+    text: `[ARP] ${holder.label} cached ${event.packet.srcIp} → ${event.packet.srcMac}`,
+    nodeId: holder.id,
     packet: event.packet,
   });
 
-  return result;
+  // Release the PDU that was waiting on this resolution; it is held by the device we just cached for.
+  if (event.pending && event.pending.kind === 'protocol') {
+    out.newEvents.push({ ...event.pending, id: generateId(), time: event.time + 1 });
+  }
 }

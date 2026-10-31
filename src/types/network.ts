@@ -17,6 +17,13 @@ export interface RoutingEntry {
   interfaceId: string;
 }
 
+/** A learned switch entry: MAC → the port it was seen on. */
+export interface MacTableEntry {
+  mac: string;
+  interfaceId: string;
+  tick: number;
+}
+
 export type TcpState =
   | 'CLOSED'
   | 'LISTEN'
@@ -37,8 +44,11 @@ export interface NetworkNode {
   y: number;
   interfaces: NetworkInterface[];
   arpTable: Record<string, string>; // IP → MAC
-  macTable?: Record<string, string>; // MAC → port (switch only)
+  /** Layer-2 forwarding table (switch only): MAC → port it was learned on. */
+  macTable?: Record<string, MacTableEntry>;
   routingTable?: RoutingEntry[];
+  /** Default gateway IP for end devices; required to reach other subnets. */
+  gateway?: string;
   tcpState?: TcpState;
 }
 
@@ -51,7 +61,8 @@ export interface NetworkEdge {
 
 export type ProtocolType =
   | 'arp-request' | 'arp-reply'
-  | 'tcp-syn' | 'tcp-syn-ack' | 'tcp-ack' | 'tcp-fin'
+  | 'tcp-syn' | 'tcp-syn-ack' | 'tcp-ack'
+  | 'udp-datagram' | 'udp-reply'
   | 'dns-query' | 'dns-response'
   | 'http-request' | 'http-response'
   | 'icmp-echo' | 'icmp-reply';
@@ -65,16 +76,47 @@ export interface Packet {
   protocol: ProtocolType;
   ttl: number;
   payload?: string;
+  /** Layer-4 ports, carried by UDP and TCP payloads. */
+  srcPort?: number;
+  dstPort?: number;
 }
 
-export interface SimEvent {
+interface SimEventBase {
   id: string;
   time: number;
+  /** Device that currently holds the frame and will emit it next. */
+  srcNodeId: string;
+  /** Device that must ultimately process this PDU. */
+  dstNodeId: string;
+  /** Device that created the PDU. */
+  originNodeId: string;
+  /** Devices the frame has already crossed; guards flooded traffic against loops. */
+  path: string[];
+}
+
+/** A PDU being sent by, or delivered to, an end device. */
+export interface ProtocolEvent extends SimEventBase {
+  kind: 'protocol';
   type: ProtocolType;
   packet: Packet;
-  srcNodeId: string;
-  dstNodeId: string;
+  /** PDU waiting on this exchange's resolution; passed to the reply and released when it lands. */
+  pending?: SimEvent;
+  /** PDU the protocol releases when its own exchange completes, e.g. HTTP GET after a handshake. */
+  followUp?: SimEvent;
 }
+
+/** The same PDU as an intermediate device must relay it, hop by hop. */
+export interface ForwardEvent extends SimEventBase {
+  kind: 'forward';
+  /** Reconstructed at the destination so the protocol layer handles it there. */
+  resume: ProtocolEvent;
+  /** Layer-2 header for the next hop; routers rewrite it, switches do not. */
+  frame: { srcMac: string; dstMac: string };
+  /** Port the frame arrived on; switches learn the source from it. */
+  ingressInterfaceId?: string;
+}
+
+export type SimEvent = ProtocolEvent | ForwardEvent;
 
 export interface AnimatedPacket {
   id: string;
@@ -123,7 +165,8 @@ export const PROTOCOL_COLORS: Record<ProtocolType, string> = {
   'tcp-syn': 'var(--proto-tcp)',
   'tcp-syn-ack': 'var(--proto-tcp)',
   'tcp-ack': 'var(--proto-tcp)',
-  'tcp-fin': 'var(--proto-tcp)',
+  'udp-datagram': 'var(--proto-udp)',
+  'udp-reply': 'var(--proto-udp)',
   'dns-query': 'var(--proto-dns)',
   'dns-response': 'var(--proto-dns)',
   'http-request': 'var(--proto-http)',
@@ -138,7 +181,8 @@ export const PROTOCOL_SHORT_LABEL: Record<ProtocolType, string> = {
   'tcp-syn': 'SYN',
   'tcp-syn-ack': 'SYN/ACK',
   'tcp-ack': 'ACK',
-  'tcp-fin': 'FIN',
+  'udp-datagram': 'UDP',
+  'udp-reply': 'UDP!',
   'dns-query': 'DNS?',
   'dns-response': 'DNS!',
   'http-request': 'GET',

@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { NetworkNode, NetworkEdge, DeviceType, NetworkInterface } from '../types/network';
+import type { NetworkNode, NetworkEdge, DeviceType, NetworkInterface, RoutingEntry } from '../types/network';
 import { DEVICE_DEFAULTS } from '../types/network';
 import { generateId, generateMac } from '../utils/mac';
 import { generateIp } from '../utils/ip';
@@ -16,6 +16,10 @@ export interface NetworkSlice {
   addEdge: (fromNodeId: string, toNodeId: string) => boolean;
   removeEdge: (id: string) => void;
   toggleEdgeStatus: (id: string) => void;
+  setInterfaceAddress: (nodeId: string, interfaceId: string, ip: string, subnetMask: string) => boolean;
+  setGateway: (nodeId: string, gateway: string | undefined) => void;
+  addRoute: (nodeId: string, entry: RoutingEntry) => void;
+  removeRoute: (nodeId: string, index: number) => void;
   getNode: (id: string) => NetworkNode | undefined;
   saveToStorage: () => void;
   loadFromStorage: () => boolean;
@@ -156,6 +160,51 @@ export const createNetworkSlice: StateCreator<NetworkSlice, [], [], NetworkSlice
   },
 
   getNode: (id) => get().nodes.find((n) => n.id === id),
+
+  /** Addressing must stay unique — the engine resolves a PDU's destination device by its IP. */
+  setInterfaceAddress: (nodeId, interfaceId, ip, subnetMask) => {
+    const taken = get().nodes.some((n) =>
+      n.interfaces.some((iface) => iface.ip === ip && iface.id !== interfaceId)
+    );
+    if (taken) return false;
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id !== nodeId
+          ? n
+          : {
+              ...n,
+              interfaces: n.interfaces.map((iface) =>
+                iface.id === interfaceId ? { ...iface, ip, subnetMask } : iface
+              ),
+            }
+      ),
+    }));
+    return true;
+  },
+
+  setGateway: (nodeId, gateway) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) => (n.id === nodeId ? { ...n, gateway } : n)),
+    }));
+  },
+
+  addRoute: (nodeId, entry) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id !== nodeId ? n : { ...n, routingTable: [...(n.routingTable ?? []), entry] }
+      ),
+    }));
+  },
+
+  removeRoute: (nodeId, index) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) =>
+        n.id !== nodeId
+          ? n
+          : { ...n, routingTable: (n.routingTable ?? []).filter((_, i) => i !== index) }
+      ),
+    }));
+  },
 
   saveToStorage: () => {
     saveTopology(get().nodes, get().edges);
