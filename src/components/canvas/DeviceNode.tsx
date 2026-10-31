@@ -52,12 +52,12 @@ export default function DeviceNode({ node, svgRef }: Props) {
 
       e.stopPropagation();
       dragging.current = true;
+      selectNode(node.id);
       if (svgRef.current) {
         const pt = clientToSvg(svgRef.current, e.clientX, e.clientY);
         offset.current = { x: pt.x - node.x, y: pt.y - node.y };
       }
       (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
-      selectNode(node.id);
     },
     [isConnectMode, connectionSourceId, canvasTool, node.id, node.x, node.y, svgRef, selectNode, setConnectionSource, addEdge]
   );

@@ -56,7 +56,7 @@ export default function DevicePalette() {
           <ol className="mt-2 list-decimal space-y-1 rounded-md border border-line-1 bg-surface-2 p-2.5 pl-6 text-[11px] leading-relaxed text-ink-2">
             {HELP_STEPS.map((step) => (
               <li key={step}>{step}</li>
-            )}
+            ))}
           </ol>
         )}
       </div>
@@ -99,7 +99,7 @@ export default function DevicePalette() {
                         <span className="block truncate text-xs font-medium text-ink-1">
                           {meta.label}
                         </span>
-                        <span className="block truncate text-[10px] text-ink-3">{meta.label}</span>
+                        <span className="block truncate text-[10px] text-ink-3">{meta.blurb}</span>
                       </span>
                     </button>
                   );

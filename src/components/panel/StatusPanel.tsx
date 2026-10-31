@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../../store';
-import { DEVICE_DEFAULTS, type NetworkNode } from '../../types/network';
+import { DEVICE_DEFAULTS, DEVICE_ORDER, type NetworkNode } from '../../types/network';
 import { isSameSubnet } from '../../utils/ip';
 import DeviceIcon from '../common/DeviceIcon';
 import { Badge, Button, Card, KeyValue, SectionTitle } from '../common/ui';
@@ -249,13 +249,13 @@ export default function StatusPanel() {
                 {nodes.length === 0 ? (
                   <p className="px-2.5 py-2 text-[11px] text-ink-3">{"No devices placed yet"}</p>
                 ) : (
-                  Object.keys(DEVICE_DEFAULTS)
+                  DEVICE_ORDER
                     .filter((type) => nodes.some((n) => n.type === type))
                     .map((type) => {
                       const count = nodes.filter((n) => n.type === type).length;
                       return (
                         <div key={type} className="flex items-center gap-2 px-2.5 py-1.5">
-                          <DeviceIcon type={type as never} size={14} className="text-ink-3" />
+                          <DeviceIcon type={type} size={14} className="text-ink-3" />
                           <span className="flex-1 text-[11px] text-ink-2">
                             {DEVICE_DEFAULTS[type].label}
                           </span>

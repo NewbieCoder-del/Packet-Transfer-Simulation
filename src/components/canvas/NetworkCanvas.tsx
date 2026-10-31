@@ -39,7 +39,6 @@ export default function NetworkCanvas() {
   const setConnectionSource = useStore((s) => s.setConnectionSource);
   const snapToGrid = useStore((s) => s.snapToGrid);
   const setCanvasZoom = useStore((s) => s.setCanvasZoom);
-  const t = useStore((s) => s.t);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const [viewBox, setViewBox] = useState<ViewBox>({ x: 0, y: 0, w: BASE_W, h: BASE_H });
@@ -50,9 +49,10 @@ export default function NetworkCanvas() {
   const isConnectMode = canvasTool === 'connect';
   const isPanMode = canvasTool === 'pan' || spacePan;
 
-  const zoomAt = useCallback((factor: number, clientX?: number, clientY?: number) => {
+  /* widthScale scales the viewBox width, so a value > 1 zooms OUT. */
+  const zoomAt = useCallback((widthScale: number, clientX?: number, clientY?: number) => {
     setViewBox((vb) => {
-      const nextW = Math.min(BASE_W / MIN_ZOOM, Math.max(BASE_W / MAX_ZOOM, vb.w * factor));
+      const nextW = Math.min(BASE_W / MIN_ZOOM, Math.max(BASE_W / MAX_ZOOM, vb.w * widthScale));
       const applied = nextW / vb.w;
       if (applied === 1) return vb;
 
@@ -152,11 +152,11 @@ export default function NetworkCanvas() {
           break;
         case 'Equal':
         case 'NumpadAdd':
-          zoomAt(1.2);
+          zoomAt(1 / 1.2);
           break;
         case 'Minus':
         case 'NumpadSubtract':
-          zoomAt(1 / 1.2);
+          zoomAt(1.2);
           break;
         case 'Escape':
           setConnectionSource(null);
@@ -361,8 +361,8 @@ export default function NetworkCanvas() {
       )}
 
       <CanvasToolbar
-        onZoomIn={() => zoomAt(1.2)}
-        onZoomOut={() => zoomAt(1 / 1.2)}
+        onZoomIn={() => zoomAt(1 / 1.2)}
+        onZoomOut={() => zoomAt(1.2)}
         onFitView={fitView}
         onResetView={() => setViewBox({ x: 0, y: 0, w: BASE_W, h: BASE_H })}
       />

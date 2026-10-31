@@ -1,20 +1,22 @@
-# Network Simulator
+# NetLab Studio
 
-An interactive, browser-based network communication visualization tool for CS students.
-Place devices on a canvas, connect them, and watch packets flow through the network step by step.
+An interactive, browser-based network communication visualizer for Computer Networks courses.
+Place devices on a canvas, connect them, and watch packets move through the topology step by step.
 
-> **[한국어 README는 아래에 있습니다.](#네트워크-시뮬레이터)**
-
----
+NetLab Studio is the continuation of the *BeforeDaybreak Network Simulator* project; the original
+topology editor and protocol engine are retained and extended rather than rewritten.
 
 ## Overview
 
-Network Simulator is an educational tool inspired by Cisco Packet Tracer, but focused on **visual understanding** rather than device configuration. It simulates network protocols (ARP, TCP, DNS, HTTP, ICMP) using state machines and visualizes packet movement across a topology you build.
+The tool is inspired by Cisco Packet Tracer, but focuses on **visual understanding** rather than
+device configuration. ARP, ICMP, TCP, DNS and HTTP are modelled as state machines, and packet
+movement is animated across a topology you build yourself.
 
 - No server required — runs entirely in the browser
-- Drag-and-drop device placement (draw.io style)
+- Drag-and-drop or click-to-place device placement
+- Resizable docks, dark and light themes, keyboard shortcuts
 - Step-by-step packet animation with protocol-specific colors
-- Real-time state panels showing ARP tables, TCP state, and packet logs
+- Live inspector showing interfaces, ARP / MAC / routing tables, TCP state and packet logs
 
 ## Tech Stack
 
@@ -22,187 +24,129 @@ Network Simulator is an educational tool inspired by Cisco Packet Tracer, but fo
 |-------|-----------|
 | Framework | React 19 + TypeScript |
 | Build | Vite |
-| State | Zustand |
+| State | Zustand (4 store slices) |
 | Rendering | SVG (no canvas libraries) |
-| Styling | Tailwind CSS v4 |
+| Styling | Tailwind CSS v4 (design tokens in `src/index.css`) |
 | Storage | LocalStorage |
 
 ## Getting Started
 
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server
-npm run dev
-
-# Build for production
-npm run build
+npm install      # install dependencies
+npm run dev      # start the dev server at http://localhost:5173
+npm run build    # type-check and produce the production bundle
+npm run preview  # serve the production build locally
 ```
-
-Open `http://localhost:5173` in your browser.
 
 ## How to Use
 
-### 1. Place Devices
-Drag devices from the left palette onto the canvas:
-- **Host (PC)** — sends/receives traffic
-- **Switch** — L2 forwarding
-- **Router** — L3 routing
-- **DNS Server** — resolves hostnames
-- **Web Server** — responds to HTTP requests
+### 1. Place devices
 
-### 2. Connect Devices
-Click **Connect Mode** in the left panel, then click two devices in sequence to create a link.
+Drag a device from the left **Device Library** onto the canvas, or click a device to arm placement
+and then click the target position.
 
-### 3. Run a Scenario
-Select a scenario from the top toolbar:
+| Device | Role |
+|--------|------|
+| **Host (PC)** | sends and receives traffic |
+| **Switch** | Layer-2 forwarding, four ports |
+| **Router** | Layer-3 routing, two ports |
+| **DNS Server** | resolves hostnames |
+| **Web Server** | answers HTTP requests |
+
+### 2. Connect devices
+
+Press **C** (or click **Connect devices**), then click two devices. A rubber-band preview follows
+the cursor while a connection is pending. Each link consumes one free port on both devices.
+
+### 3. Run a scenario
+
+Pick a scenario in the top toolbar — it starts immediately:
+
 | Scenario | Flow |
 |----------|------|
 | **Ping** | ARP Request → ARP Reply → ICMP Echo → ICMP Reply |
-| **HTTP Request** | ARP → TCP 3-Way Handshake (SYN → SYN-ACK → ACK) → HTTP GET → HTTP Response |
+| **HTTP Request** | ARP → TCP 3-Way Handshake → HTTP GET → HTTP Response |
 | **DNS Lookup** | DNS Query → DNS Response |
 
-### 4. Control Simulation
-- **Play** — auto-advance through all events
-- **Step** — advance one event at a time
-- **Pause / Reset** — pause or restart
+### 4. Control the simulation
+
+- **Play / Pause** — run or freeze the event queue
+- **Step** — advance exactly one event
+- **Reset** — clear events and animated packets
 - **Speed** — 0.5x, 1x, 2x, 4x
 
-### 5. Inspect State
-Click any device to view in the right panel:
-- IP / MAC addresses
-- ARP table (updated in real-time)
-- TCP connection state
-- Packet log (color-coded by protocol)
+### 5. Inspect state
 
-### 6. Save / Load
-Save your topology to LocalStorage and reload it later.
+Click a device or a link to open it in the right-hand panel: interfaces (name, MAC, IP, mask),
+ARP table, switch MAC table, routing table, TCP state, and the connection list. The bottom dock
+holds the packet log, filterable by protocol.
+
+### 6. Save and load
+
+**Save** stores the topology in LocalStorage; **Load** restores it, including interface and table
+state. Legacy topologies saved by the previous version are normalized automatically on load.
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `V` | Select / move tool |
+| `H` | Pan tool |
+| `C` | Connect tool |
+| `F` | Fit topology to view |
+| `[` `]` | Narrow / widen the left dock |
+| `+` `-` | Zoom in / out |
+| `Delete` | Remove the selected device or link |
+| `Esc` | Cancel placement, pending link or selection |
+| `Space` (hold) | Temporary pan |
+
+The canvas toolbelt also exposes snap-to-grid, zoom percentage, fit and reset-view controls.
 
 ## Project Structure
 
 ```
 src/
-├── types/network.ts           # Core type definitions
+├── types/network.ts           # Core types, device metadata, protocol colors
 ├── store/                     # Zustand store (4 slices)
-│   ├── network-slice.ts       # Graph CRUD (nodes, edges)
-│   ├── simulation-slice.ts    # Event queue, active packets
-│   ├── ui-slice.ts            # Selection, connection mode
+│   ├── network-slice.ts       # Graph CRUD, port allocation, persistence
+│   ├── simulation-slice.ts    # Event queue, animated packets
+│   ├── ui-slice.ts            # Theme, dock sizes, selection, tools
 │   └── log-slice.ts           # Packet log entries
 ├── engine/
 │   ├── simulator.ts           # Event dispatcher (pure function)
-│   ├── routing.ts             # BFS pathfinding
+│   ├── routing.ts             # Direct-edge lookup and BFS pathfinding
 │   ├── scenarios.ts           # Preset scenario generators
 │   └── protocols/             # Protocol state machines
-│       ├── arp.ts
-│       ├── icmp.ts
-│       ├── tcp.ts
-│       ├── dns.ts
-│       └── http.ts
+│       ├── arp.ts  icmp.ts  tcp.ts  dns.ts  http.ts
 ├── components/
-│   ├── canvas/                # SVG canvas, nodes, edges, animations
-│   ├── palette/               # Device palette (drag source)
-│   ├── panel/                 # Status panel, packet log
-│   └── toolbar/               # Simulation controls
+│   ├── canvas/                # SVG canvas, device nodes, edges, packet animation
+│   ├── palette/               # Device library (drag source)
+│   ├── panel/                 # Inspector, packet log, packet dock
+│   ├── toolbar/               # Simulation controls
+│   ├── layout/                # Title bar, status bar, resize handles
+│   └── common/                # Shared UI primitives and device glyphs
 ├── hooks/use-simulation.ts    # rAF-based simulation orchestrator
-└── utils/                     # MAC/IP generation, geometry, storage
+└── utils/                     # MAC / IP / geometry helpers, LocalStorage
 ```
 
 ## Architecture
 
-The simulation engine is built on a **pure-function event loop**:
+The engine runs on a **pure-function event loop**:
 
 ```
-processEvent(state, event) → { stateMutations, newEvents, packetAnimations }
+processEvent(event, nodes, edges) → { arpMutations, tcpMutations, newEvents, animations, logs }
 ```
 
-Each protocol handler receives an event, returns state changes and follow-up events. The `useSimulation` hook drives the loop with `requestAnimationFrame`, coordinating event processing and packet animations.
+Each protocol handler receives one event and returns state changes plus follow-up events. The
+`useSimulation` hook drives the loop with `requestAnimationFrame`, coordinating event processing
+with packet animation timing. Theme and dock layout persist under a separate `netlab-prefs`
+LocalStorage key so they survive reloads without touching topology data.
 
----
+## Known Limitations
 
-# 네트워크 시뮬레이터
-
-CS 학생을 위한 인터랙티브 브라우저 기반 네트워크 통신 시각화 도구입니다.
-캔버스에 장비를 배치하고 연결한 뒤, 패킷이 네트워크를 통해 이동하는 과정을 단계별로 관찰할 수 있습니다.
-
-## 개요
-
-Cisco Packet Tracer에서 영감을 받았지만, 장비 설정보다 **시각적 이해**에 초점을 맞춘 교육용 도구입니다. ARP, TCP, DNS, HTTP, ICMP 프로토콜을 상태 머신으로 시뮬레이션하고, 직접 구성한 토폴로지 위에서 패킷 이동을 시각화합니다.
-
-- 서버 불필요 — 브라우저 단독 실행
-- 드래그&드롭 장비 배치 (draw.io 스타일)
-- 프로토콜별 색상으로 구분된 단계별 패킷 애니메이션
-- ARP 테이블, TCP 상태, 패킷 로그를 실시간으로 표시하는 상태 패널
-
-## 기술 스택
-
-| 영역 | 기술 |
-|------|------|
-| 프레임워크 | React 19 + TypeScript |
-| 빌드 | Vite |
-| 상태 관리 | Zustand |
-| 렌더링 | SVG (캔버스 라이브러리 없음) |
-| 스타일링 | Tailwind CSS v4 |
-| 저장소 | LocalStorage |
-
-## 시작하기
-
-```bash
-# 의존성 설치
-npm install
-
-# 개발 서버 시작
-npm run dev
-
-# 프로덕션 빌드
-npm run build
-```
-
-브라우저에서 `http://localhost:5173`을 열어주세요.
-
-## 사용 방법
-
-### 1. 장비 배치
-좌측 팔레트에서 장비를 캔버스로 드래그합니다:
-- **Host (PC)** — 트래픽 송수신
-- **Switch** — L2 포워딩
-- **Router** — L3 라우팅
-- **DNS Server** — 호스트네임 해석
-- **Web Server** — HTTP 요청 응답
-
-### 2. 장비 연결
-좌측 패널의 **Connect Mode** 버튼을 클릭한 뒤, 두 장비를 순서대로 클릭하면 연결됩니다.
-
-### 3. 시나리오 실행
-상단 툴바에서 시나리오를 선택합니다:
-| 시나리오 | 흐름 |
-|---------|------|
-| **Ping** | ARP Request → ARP Reply → ICMP Echo → ICMP Reply |
-| **HTTP Request** | ARP → TCP 3-Way Handshake (SYN → SYN-ACK → ACK) → HTTP GET → HTTP Response |
-| **DNS Lookup** | DNS Query → DNS Response |
-
-### 4. 시뮬레이션 제어
-- **Play** — 모든 이벤트를 자동 진행
-- **Step** — 한 이벤트씩 진행
-- **Pause / Reset** — 일시정지 또는 초기화
-- **Speed** — 0.5x, 1x, 2x, 4x 속도 조절
-
-### 5. 상태 확인
-장비를 클릭하면 우측 패널에서 확인 가능:
-- IP / MAC 주소
-- ARP 테이블 (실시간 업데이트)
-- TCP 연결 상태
-- 패킷 로그 (프로토콜별 색상 구분)
-
-### 6. 저장 / 불러오기
-토폴로지를 LocalStorage에 저장하고 나중에 불러올 수 있습니다.
-
-## 아키텍처
-
-시뮬레이션 엔진은 **순수 함수 기반 이벤트 루프**로 구현되어 있습니다:
-
-```
-processEvent(state, event) → { stateMutations, newEvents, packetAnimations }
-```
-
-각 프로토콜 핸들러는 이벤트를 받아 상태 변경과 후속 이벤트를 반환합니다. `useSimulation` 훅이 `requestAnimationFrame`으로 루프를 구동하며, 이벤트 처리와 패킷 애니메이션을 조율합니다.
+- Packet animation is currently drawn only between **directly connected** devices. A topology that
+  routes through a switch or a router produces correct protocol logs, but the intermediate hops are
+  not yet animated. Multi-hop forwarding is the subject of the next increment.
+- Interfaces are named and port-bound in the data model, but protocol handlers do not yet use
+  per-port forwarding decisions.
+- No automated test suite yet.

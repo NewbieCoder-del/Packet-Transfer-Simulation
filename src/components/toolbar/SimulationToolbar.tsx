@@ -47,7 +47,6 @@ export default function SimulationToolbar() {
   const setSpeed = useStore((s) => s.setSpeed);
   const enqueueEvent = useStore((s) => s.enqueueEvent);
   const eventQueue = useStore((s) => s.eventQueue);
-  const tf = useStore((s) => s.tf);
 
   const { start, pause, resume, stepOnce, reset } = useSimulation();
   const [flash, setFlash] = useState<string | null>(null);
