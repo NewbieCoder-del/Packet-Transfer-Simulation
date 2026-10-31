@@ -1,8 +1,10 @@
 import type { StateCreator } from 'zustand';
 import type { DeviceType } from '../types/network';
+import type { LabId } from '../labs/types';
 import { loadPrefs, savePrefs, type UiPrefs } from '../utils/storage';
 
 export type CanvasTool = 'select' | 'pan' | 'connect';
+export type AppSection = 'simulator' | 'labs';
 
 export const PANEL_LIMITS = {
   left: { min: 190, max: 420 },
@@ -30,6 +32,8 @@ function clamp(value: number, { min, max }: { min: number; max: number }): numbe
 const initialPrefs = loadPrefs(DEFAULT_PREFS);
 
 export interface UiSlice extends UiPrefs {
+  section: AppSection;
+  activeLabId: LabId;
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
   connectionSourceId: string | null;
@@ -37,6 +41,8 @@ export interface UiSlice extends UiPrefs {
   pendingDeviceType: DeviceType | null;
   canvasZoom: number;
 
+  setSection: (section: AppSection) => void;
+  setActiveLabId: (id: LabId) => void;
   setTheme: (theme: UiPrefs['theme']) => void;
   toggleTheme: () => void;
   setLeftWidth: (px: number) => void;
@@ -66,6 +72,8 @@ export const createUiSlice: StateCreator<UiSlice, [], [], UiSlice> = (set, get) 
 
   return {
     ...initialPrefs,
+    section: 'simulator',
+    activeLabId: 'osi',
     selectedNodeId: null,
     selectedEdgeId: null,
     connectionSourceId: null,
@@ -73,6 +81,8 @@ export const createUiSlice: StateCreator<UiSlice, [], [], UiSlice> = (set, get) 
     pendingDeviceType: null,
     canvasZoom: 1,
 
+    setSection: (section) => set({ section }),
+    setActiveLabId: (activeLabId) => set({ activeLabId }),
     setTheme: (theme) => {
       applyTheme(theme);
       patch({ theme });

@@ -18,6 +18,7 @@ frame is forwarded hop by hop through the switches and routers of a topology you
 - Resizable docks, dark and light themes, keyboard shortcuts
 - Step-by-step packet animation with protocol-specific colors
 - Live inspector showing interfaces, ARP / MAC / routing tables, TCP state and packet logs
+- Six step-through Networking Labs for OSI encapsulation, CRC, Hamming codes, ARQ, MAC and TCP congestion
 
 ## Tech Stack
 
@@ -29,12 +30,14 @@ frame is forwarded hop by hop through the switches and routers of a topology you
 | Rendering | SVG (no canvas libraries) |
 | Styling | Tailwind CSS v4 (design tokens in `src/index.css`) |
 | Storage | LocalStorage |
+| Tests | Vitest |
 
 ## Getting Started
 
 ```bash
 npm install      # install dependencies
 npm run dev      # start the dev server at http://localhost:5173
+npm test         # run the algorithm and engine test suite
 npm run build    # type-check and produce the production bundle
 npm run preview  # serve the production build locally
 ```
@@ -97,6 +100,25 @@ that device saw them.
 **Save** stores the topology in LocalStorage; **Load** restores it, including interface and table
 state. Legacy topologies saved by the previous version are normalized automatically on load.
 
+### 7. Networking Labs
+
+The **Labs** tab in the title bar opens six standalone teaching laboratories. Each lab has its own
+configuration form, a **Start / Pause** auto-play, **Step** to advance exactly one step, and
+**Reset**, with every calculation and state transition written out as it happens.
+
+| Lab | What it demonstrates |
+|-----|----------------------|
+| **OSI Model** | Encapsulation down the seven layers and decapsulation back up, with the PDU name, header size and total frame size at each layer |
+| **CRC** | Polynomial long division of the data by the generator, the transmitted frame, a single-bit corruption and the receiver's remainder check |
+| **Hamming Code** | Parity-bit placement, the encoded codeword, syndrome calculation, single-bit error detection and correction |
+| **ARQ Protocols** | Stop-and-Wait, Go-Back-N and Selective Repeat over a seeded channel with configurable frame loss, showing every ACK, timeout and retransmission |
+| **Medium Access Control** | Pure ALOHA, Slotted ALOHA and CSMA/CD on a shared channel, with per-station success, collision bands and throughput versus the theoretical maximum |
+| **TCP Congestion Control** | Slow start, congestion avoidance, 3-duplicate-ACK fast recovery and timeout collapse, charted RTT by RTT |
+
+ARQ and MAC use a seeded pseudo-random channel, so the same seed always reproduces the same run.
+Configuration changes regenerate the result and return playback to the first step. The labs share
+the simulator's theme and are entirely independent of the topology workspace.
+
 ## Keyboard Shortcuts
 
 | Key | Action |
@@ -130,10 +152,16 @@ src/
 │   ├── scenarios.ts           # Preset scenario generators
 │   └── protocols/             # Protocol state machines
 │       ├── arp.ts  icmp.ts  tcp.ts  udp.ts  dns.ts  http.ts
+├── labs/                      # Pure lab engines, registry and playback hook
+│   ├── osi.ts  crc.ts  hamming.ts  arq.ts  mac.ts  tcp-congestion.ts
+│   ├── registry.ts            # Lab catalogue used by the sidebar
+│   ├── use-lab-player.ts      # Step / play / reset state machine
+│   └── *.test.ts              # One Vitest file per algorithm
 ├── components/
 │   ├── canvas/                # SVG canvas, device nodes, edges, packet animation
 │   ├── palette/               # Device library (drag source)
 │   ├── panel/                 # Inspector, packet log, packet inspector
+│   ├── labs/                  # Labs sidebar, shared frame and one component per lab
 │   ├── toolbar/               # Simulation controls
 │   ├── layout/                # Title bar, status bar, resize handles
 │   └── common/                # Shared UI primitives and device glyphs
@@ -173,4 +201,9 @@ topology data.
 - Header fields shown in the packet inspector are the ones the engine actually uses; checksums,
   options and fragmentation are not modelled.
 - LocalStorage holds a single topology slot plus UI preferences; there are no named profiles.
-- No automated test suite yet.
+- The labs are teaching models, not full protocol stacks: CRC and Hamming operate on bit strings with
+  a single injected error, ARQ runs a discrete-time stop-and-wait / sliding-window channel with
+  seeded loss, MAC uses fixed-length slots, and TCP congestion control advances once per RTT with no
+  delayed ACKs, SACK or receiver window. Session state (results, playback position) is not persisted.
+- The test suite covers the lab algorithms and the forwarding engine; canvas interactions and lab
+  React components are exercised manually rather than in a DOM test environment.

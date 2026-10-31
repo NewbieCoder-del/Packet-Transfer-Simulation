@@ -17,6 +17,8 @@ const MoonIcon = (
 export default function TitleBar() {
   const theme = useStore((s) => s.theme);
   const toggleTheme = useStore((s) => s.toggleTheme);
+  const section = useStore((s) => s.section);
+  const setSection = useStore((s) => s.setSection);
 
   return (
     <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line-1 bg-surface-1 px-3">
@@ -34,6 +36,26 @@ export default function TitleBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-1.5">
+        <div className="mr-1 flex rounded-sm border border-line-1 bg-surface-2 p-0.5" role="tablist" aria-label="Workspace">
+          {(
+            [
+              ['simulator', 'Simulator'],
+              ['labs', 'Labs'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={section === id}
+              onClick={() => setSection(id)}
+              className={`rounded-xs px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                section === id ? 'bg-accent text-accent-ink' : 'text-ink-2 hover:bg-surface-3 hover:text-ink-1'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <TipButton
           label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           onClick={toggleTheme}
